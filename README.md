@@ -42,10 +42,15 @@ npm run dev
 
 ### API
 
-Register
-URL: /api/auth/register
-Method: POST
-Body:
+## Register
+
+# URL: /api/auth/register
+
+# Method: POST
+
+# Body:
+
+```bash
 {
 "firstName": "John",
 "lastName": "Doe",
@@ -53,39 +58,71 @@ Body:
 "password": "password123",
 "role": "student"
 }
-Login
-URL: /api/auth/login
-Method: POST
-Body:
+```
+
+## Login
+
+# URL: /api/auth/login
+
+# Method: POST
+
+# Body:
+
+```bash
 {
 "email": "john.doe@example.com",
 "password": "password123"
 }
-Response:
+```
+
+# Response:
+
+```bash
 {
 "token": "your_jwt_token"
 }
-Assign Student to Trainer
-URL: /api/trainer/assign-student
-Method: POST
-Headers:
-Authorization: Bearer <your_jwt_token>
-Body
+```
+
+## Assign Student to Trainer
+
+# URL: /api/trainer/assign-student
+
+# Method: POST
+
+# Headers:
+
+# Authorization: Bearer <your_jwt_token>
+
+# Body
+
+```bash
 {
 "trainerId": "trainer_id_here",
 "studentId": "student_id_here"
 }
-Get Trainer's Students
-URL: /api/trainer/:trainerId/students
-Method: GET
-Headers:
-Authorization: Bearer <your_jwt_token>
-Project Structure
-config/: Configuration files, including database connection settings.
-middleware/: Middleware functions, including authentication.
-models/: Mongoose models for database interaction.
-routes/: API route definitions.
-server.js: Main server file.
+```
+
+## Get Trainer's Students
+
+# URL: /api/trainer/:trainerId/students
+
+# Method: GET
+
+# Headers:
+
+# Authorization: Bearer <your_jwt_token>
+
+## Project Structure
+
+# config/: Configuration files, including database connection settings.
+
+# middleware/: Middleware functions, including authentication.
+
+# models/: Mongoose models for database interaction.
+
+# routes/: API route definitions.
+
+# server.js: Main server file.
 
 ### Contributing
 

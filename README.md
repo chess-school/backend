@@ -44,11 +44,11 @@ npm run dev
 
 ## Register
 
-# URL: /api/auth/register
+### URL: /api/auth/register
 
-# Method: POST
+### Method: POST
 
-# Body:
+### Body:
 
 ```bash
 {
@@ -62,11 +62,11 @@ npm run dev
 
 ## Login
 
-# URL: /api/auth/login
+### URL: /api/auth/login
 
-# Method: POST
+### Method: POST
 
-# Body:
+### Body:
 
 ```bash
 {
@@ -75,7 +75,7 @@ npm run dev
 }
 ```
 
-# Response:
+### Response:
 
 ```bash
 {
@@ -85,15 +85,15 @@ npm run dev
 
 ## Assign Student to Trainer
 
-# URL: /api/trainer/assign-student
+### URL: /api/trainer/assign-student
 
-# Method: POST
+### Method: POST
 
-# Headers:
+### Headers:
 
-# Authorization: Bearer <your_jwt_token>
+### Authorization: Bearer <your_jwt_token>
 
-# Body
+### Body
 
 ```bash
 {
@@ -104,25 +104,25 @@ npm run dev
 
 ## Get Trainer's Students
 
-# URL: /api/trainer/:trainerId/students
+### URL: /api/trainer/:trainerId/students
 
-# Method: GET
+### Method: GET
 
-# Headers:
+### Headers:
 
-# Authorization: Bearer <your_jwt_token>
+### Authorization: Bearer <your_jwt_token>
 
 ## Project Structure
 
-# config/: Configuration files, including database connection settings.
+### config/: Configuration files, including database connection settings.
 
-# middleware/: Middleware functions, including authentication.
+### middleware/: Middleware functions, including authentication.
 
-# models/: Mongoose models for database interaction.
+### models/: Mongoose models for database interaction.
 
-# routes/: API route definitions.
+### routes/: API route definitions.
 
-# server.js: Main server file.
+### server.js: Main server file.
 
 ### Contributing
 

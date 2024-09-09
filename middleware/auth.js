@@ -1,27 +1,25 @@
 const jwt = require('jsonwebtoken');
 
-module.exports = function (roles = []) {
-    if (typeof roles === 'string') {
-        roles = [roles];
+module.exports = function (req, res, next) {
+    if (req.method === "OPTIONS") {
+        next();
     }
 
-    return (req, res, next) => {
-        const token = req.header('Authorization');
+    try {
+        if (!req.headers.authorization) {
+            return res.status(403).json({ message: "Пользователь не авторизован, токен не передан" });
+        }
+
+        const token = req.headers.authorization.split(' ')[1]; // Bearer <token>
         if (!token) {
-            return res.status(401).json({ msg: 'No token, authorization denied' });
+            return res.status(403).json({ message: "Пользователь не авторизован, токен отсутствует" });
         }
 
-        try {
-            const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            req.user = decoded;
-
-            if (roles.length && !roles.includes(req.user.role)) {
-                return res.status(403).json({ msg: 'Access denied' });
-            }
-
-            next();
-        } catch (err) {
-            res.status(401).json({ msg: 'Token is not valid' });
-        }
-    };
+        const decodedData = jwt.verify(token, process.env.JWT_SECRET);
+        req.user = decodedData;
+        next();
+    } catch (e) {
+        console.log(e);
+        return res.status(403).json({ message: "Пользователь не авторизован, ошибка в токене" });
+    }
 };

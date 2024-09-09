@@ -1,45 +1,43 @@
 const express = require('express');
-const auth = require('../middleware/auth');
+const authMiddleware = require('../middleware/auth');
+const roleMiddleware = require('../middleware/role');
 const User = require('../models/User');
 const router = express.Router();
 
-router.post('/assign-student', auth(['admin', 'trainer']), async (req, res) => {
-    const { trainerId, studentId } = req.body;
+router.post('/assign-student', authMiddleware, roleMiddleware(['admin', 'coach']), async (req, res) => {
+    const { coachEmail, studentEmail } = req.body;
 
     try {
-        const trainer = await User.findById(trainerId);
-        if (!trainer || trainer.role !== 'trainer') {
-            return res.status(400).json({ msg: 'Invalid trainer' });
+        const coach = await User.findOne({ email: coachEmail });
+        if (!coach || !coach.roles.includes('coach')) {
+            return res.status(400).json({ msg: 'Invalid coach' });
         }
 
-        // Проверяем, что ученик существует
-        const student = await User.findById(studentId);
-        if (!student || student.role !== 'student') {
+        const student = await User.findOne({ email: studentEmail });
+        if (!student || !student.roles.includes('student')) {
             return res.status(400).json({ msg: 'Invalid student' });
         }
 
-        // Назначаем ученика тренеру
-        student.trainer = trainerId;
+        student.trainer = coach._id;
         await student.save();
 
-        // Добавляем ученика в список учеников тренера
-        trainer.students.push(studentId);
-        await trainer.save();
+        coach.students.push(student._id);
+        await coach.save();
 
-        res.json({ msg: 'Student assigned to trainer successfully' });
+        res.json({ msg: 'Student assigned to coach successfully' });
     } catch (err) {
         res.status(500).send('Server error');
     }
 });
 
-router.get('/:trainerId/students', auth(['admin', 'trainer']), async (req, res) => {
+router.get('/:coachEmail/students', authMiddleware, roleMiddleware(['admin', 'coach']), async (req, res) => {
     try {
-        const trainer = await User.findById(req.params.trainerId).populate('students');
-        if (!trainer || trainer.role !== 'trainer') {
-            return res.status(400).json({ msg: 'Invalid trainer' });
+        const coach = await User.findOne({ email: req.params.coachEmail }).populate('students');
+        if (!coach || !coach.roles.includes('coach')) {
+            return res.status(400).json({ msg: 'Invalid coach' });
         }
 
-        res.json(trainer.students);
+        res.json(coach.students);
     } catch (err) {
         res.status(500).send('Server error');
     }

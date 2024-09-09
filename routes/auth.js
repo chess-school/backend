@@ -1,48 +1,20 @@
+const controller = require('../controllers/auth')
 const express = require('express');
-const User = require('../models/User');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
+const {check} = require('express-validator');
 const router = express.Router();
+const authMiddleware = require('../middleware/auth')
+const roleMiddleware = require('../middleware/role')
 
-router.post('/register', async (req, res) => {
-    const { firstName, lastName, email, password, role } = req.body;
-    
-    try {
-        let user = await User.findOne({ email });
-        if (user) {
-            return res.status(400).json({ msg: 'User already exists' });
-        }
-        user = new User({ firstName, lastName, email, password, role });
-        await user.save();
+router.post('/register', [
+    check('firstName', "Firstname cannot be empty").notEmpty(),
+    check('lastName', "Lastname cannot be empty").notEmpty(),
+    check('email', "Email cannot be empty").notEmpty(),
+    check('password', "Password name cannot be empty").isLength({min: 8, max: 20}),
 
-        const payload = { userId: user.id, role: user.role };
-        const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
-        res.json({ token });
-    } catch (err) {
-        res.status(500).send('Server error');
-    }
-});
+], controller.registration);
 
-router.post('/login', async (req, res) => {
-    const { email, password } = req.body;
+router.post('/login', controller.login);
 
-    try {
-        const user = await User.findOne({ email });
-        if (!user) {
-            return res.status(400).json({ msg: 'Invalid credentials' });
-        }
-
-        const isMatch = await user.comparePassword(password);
-        if (!isMatch) {
-            return res.status(400).json({ msg: 'Invalid credentials' });
-        }
-
-        const payload = { userId: user.id, role: user.role };
-        const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
-        res.json({ token });
-    } catch (err) {
-        res.status(500).send('Server error');
-    }
-});
+router.get('/users', roleMiddleware(['admin']), controller.getUsers);
 
 module.exports = router;

@@ -1,19 +1,17 @@
 const express = require('express');
-const auth = require('../middleware/auth');
+const authMiddleware = require('../middleware/auth');
+const roleMiddleware = require('../middleware/role');
 const router = express.Router();
 
-// Роут доступен только для админа
-router.get('/admin', auth('admin'), (req, res) => {
+router.get('/admin', authMiddleware, roleMiddleware(['admin']), (req, res) => {
     res.send('Welcome Admin');
 });
 
-// Роут доступен для тренера и админа
-router.get('/trainer', auth(['trainer', 'admin']), (req, res) => {
-    res.send('Welcome Trainer');
+router.get('/coach', roleMiddleware(['coach', 'admin']), (req, res) => {
+    res.send('Welcome Coach or Admin');
 });
 
-// Роут доступен для ученика
-router.get('/student', auth('student'), (req, res) => {
+router.get('/student', authMiddleware, roleMiddleware(['student']), (req, res) => {
     res.send('Welcome Student');
 });
 

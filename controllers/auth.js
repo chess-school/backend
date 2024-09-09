@@ -8,8 +8,8 @@ const generateAccessToken = (id, roles) => {
     const payload = {
         id,
         roles
-    }
-    return jwt.sign(payload, process.env.JWT_SECRET, {expiresIn: "24h"} )
+    };
+    return jwt.sign(payload, process.env.JWT_SECRET, {expiresIn: "24h"} );
 }
 
 class AuthController {
@@ -25,7 +25,7 @@ class AuthController {
             if (user) {
                 return res.status(400).json({ msg: 'User already exists' });
             }
-            const userRole = await Role.findOne({value: "student"})
+            const userRole = await Role.findOne({value: "user"})
             if (!userRole) {
                 return res.status(400).json({ msg: 'Role not found' });
             }
@@ -72,4 +72,4 @@ class AuthController {
 }
 
 
-module.exports = new AuthController()
+module.exports = new AuthController();

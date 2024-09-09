@@ -9,10 +9,7 @@ const app = express();
 
 app.use(express.json());
 
-app.use('/api/auth', require('./routes/auth'));
-app.use('/api/protected', require('./routes/protected'));
-app.use('/api/trainer', require('./routes/trainer'));
-
+app.use('/api', require('./routes'));
 
 const PORT = process.env.PORT || 5000;
 

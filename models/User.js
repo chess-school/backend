@@ -28,7 +28,8 @@ const UserSchema = new mongoose.Schema({
     },
     roles: [{
         type: String,
-        ref: 'Role'
+        ref: 'Role',
+        default: 'user'
     }],
 
     students: [StudentSchema],

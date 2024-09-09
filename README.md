@@ -96,9 +96,9 @@ Authorization: Bearer <your_jwt_token>
 Body
 
 ```bash
-{
-"trainerId": "trainer_id_here",
-"studentId": "student_id_here"
+  {
+  "coachEmail": "coach@gmail.com",
+  "studentEmail": "student@gmail.com"
 }
 ```
 

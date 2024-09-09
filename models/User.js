@@ -1,6 +1,13 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 
+const StudentSchema = new mongoose.Schema({
+    _id: mongoose.Schema.Types.ObjectId,
+    firstName: String,
+    lastName: String,
+    email: String
+});
+
 const UserSchema = new mongoose.Schema({
     firstName: {
         type: String,
@@ -24,14 +31,15 @@ const UserSchema = new mongoose.Schema({
         ref: 'Role'
     }],
 
-    students: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-    }],
+    students: [StudentSchema],
 
     trainer: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
+    },
+
+    trainerEmail: {
+        type: String
     }
 });
 

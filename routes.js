@@ -17,7 +17,7 @@ router.post('/auth/register', [
 
 router.post('/auth/login', authController.login);
 
-router.get('/auth/users', roleMiddleware(['admin']), authController.getUsers);
+router.get('/users', roleMiddleware(['admin']), authController.getUsers);
 
 router.get('/protected/admin', authMiddleware, roleMiddleware(['admin']), (req, res) => {
     res.send('Welcome Admin');
@@ -38,6 +38,9 @@ router.get('/trainer/:coachEmail/students', authMiddleware, roleMiddleware(['adm
 router.post('/assign-user-to-student', authMiddleware, roleMiddleware(['admin']), adminController.assignStudent);
 
 router.post('/admin/assign-coach', authMiddleware, roleMiddleware(['admin']), adminController.assignCoach);
+
+router.post('/admin/remove-role', authMiddleware, roleMiddleware(['admin']), adminController.removeRole);
+
 
 
 module.exports = router;

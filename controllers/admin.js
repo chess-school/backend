@@ -46,6 +46,29 @@ class AdminController {
             res.status(500).send('Server error');
         }
     }
+
+    async removeRole(req, res) {
+        const { userEmail, role } = req.body; 
+
+        try {
+            const user = await User.findOne({ email: userEmail });
+            if (!user) {
+                return res.status(400).json({ msg: 'User not found' });
+            }
+
+            if (!user.roles.includes(role)) {
+                return res.status(400).json({ msg: `User does not have the role: ${role}` });
+            }
+
+            user.roles = user.roles.filter(userRole => userRole !== role);
+            await user.save();
+
+            res.json({ msg: `Role ${role} removed successfully from user` });
+        } catch (err) {
+            console.error(err);
+            res.status(500).send('Server error');
+        }
+    }
 }
 
 module.exports = new AdminController();

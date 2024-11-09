@@ -10,9 +10,9 @@ const app = express();
 
 app.use(express.json());
 app.use(cors({
-    origin: 'http://localhost:3002',
+    origin: ['http://localhost:3002', 'http://localhost:3001'],
   }));
-  
+
 app.use('/api', require('./routes'));
 
 const PORT = process.env.PORT || 5000;

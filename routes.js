@@ -1,6 +1,7 @@
 const authController = require('./controllers/auth')
 const coachController = require('./controllers/coach');
 const adminController = require('./controllers/admin');
+const scheduleController = require('./controllers/schedule');
 const express = require('express');
 const {check} = require('express-validator');
 const router = express.Router();
@@ -41,6 +42,37 @@ router.post('/admin/assign-coach', authMiddleware, roleMiddleware(['admin']), ad
 
 router.post('/admin/remove-role', authMiddleware, roleMiddleware(['admin']), adminController.removeRole);
 
-
+// Создание записи в расписании (только для тренеров)
+router.post(
+    '/schedule/create',
+    authMiddleware,
+    roleMiddleware(['coach']),
+    scheduleController.createSchedule
+  );
+  
+  // Получение расписания для ученика (доступно для тренеров и учеников)
+  router.get(
+    '/schedule/student/:studentId',
+    authMiddleware,
+    roleMiddleware(['coach', 'student']),
+    scheduleController.getSchedule
+  );
+  
+  // Обновление записи в расписании (только для тренеров)
+  router.put(
+    '/schedule/:id',
+    authMiddleware,
+    roleMiddleware(['coach']),
+    scheduleController.updateSchedule
+  );
+  
+  // Удаление записи в расписании (только для тренеров)
+  router.delete(
+    '/schedule/:id',
+    authMiddleware,
+    roleMiddleware(['coach']),
+    scheduleController.deleteSchedule
+  );
+  
 
 module.exports = router;

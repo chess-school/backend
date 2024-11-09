@@ -68,7 +68,51 @@ class AuthController {
             res.status(500).send(err);
         }
     }
-    
+
+    async getProfile(req, res) {
+        try {
+            const userId = req.user.id;
+            const user = await User.findById(userId).select('-password');
+            if (!user) {
+                return res.status(404).json({ msg: 'Пользователь не найден' });
+            }
+            res.json(user);
+        } catch (error) {
+            console.error('Ошибка при получении профиля:', error);
+            res.status(500).json({ msg: 'Ошибка сервера' });
+        }
+    }
+
+    async updateProfile(req, res) {
+        const { firstName, lastName, email, currentPassword, newPassword } = req.body;
+        try {
+            const userId = req.user.id;
+            const user = await User.findById(userId);
+
+            if (!user) {
+                return res.status(404).json({ msg: 'Пользователь не найден' });
+            }
+
+            if (currentPassword && newPassword) {
+                const isMatch = await bcrypt.compare(currentPassword, user.password);
+                if (!isMatch) {
+                    return res.status(400).json({ msg: 'Неверный текущий пароль' });
+                }
+                const salt = await bcrypt.genSalt(10);
+                user.password = await bcrypt.hash(newPassword, salt);
+            }
+
+            if (firstName) user.firstName = firstName;
+            if (lastName) user.lastName = lastName;
+            if (email) user.email = email;
+
+            await user.save();
+            res.json({ msg: 'Данные профиля обновлены' });
+        } catch (error) {
+            console.error('Ошибка при обновлении профиля:', error);
+            res.status(500).json({ msg: 'Ошибка сервера' });
+        }
+    }  
 }
 
 

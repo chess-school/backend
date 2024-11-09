@@ -31,16 +31,17 @@ const UserSchema = new mongoose.Schema({
         ref: 'Role',
         default: 'user'
     }],
-
     students: [StudentSchema],
-
     trainer: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
     },
-
     trainerEmail: {
         type: String
+    },
+    registrationDate: {
+        type: Date,
+        default: Date.now
     }
 });
 

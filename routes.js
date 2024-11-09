@@ -32,9 +32,13 @@ router.get('/protected/student', authMiddleware, roleMiddleware(['student']), (r
     res.send('Welcome Student');
 });
 
-router.post('/trainer/assign-student', authMiddleware, roleMiddleware(['admin', 'coach']), coachController.assingStudent);
+router.post('/trainer/assign-student', authMiddleware, roleMiddleware(['admin', 'coach']), coachController.assignStudent);
 
-router.get('/trainer/:coachEmail/students', authMiddleware, roleMiddleware(['admin', 'coach']), coachController.getStudents);
+router.get('/trainer/students', authMiddleware, roleMiddleware(['coach', 'admin']), coachController.getStudents);
+
+router.delete('/trainer/remove-student', authMiddleware, roleMiddleware(['coach', 'admin']), coachController.removeStudent);
+
+router.get('/trainer/student', authMiddleware, roleMiddleware(['coach', 'admin']), coachController.getStudentById);
 
 router.post('/assign-user-to-student', authMiddleware, roleMiddleware(['admin']), adminController.assignStudent);
 
@@ -42,37 +46,17 @@ router.post('/admin/assign-coach', authMiddleware, roleMiddleware(['admin']), ad
 
 router.post('/admin/remove-role', authMiddleware, roleMiddleware(['admin']), adminController.removeRole);
 
-// Создание записи в расписании (только для тренеров)
-router.post(
-    '/schedule/create',
-    authMiddleware,
-    roleMiddleware(['coach']),
-    scheduleController.createSchedule
-  );
+router.post('/schedule/create', authMiddleware, roleMiddleware(['coach']), scheduleController.createSchedule);
   
-  // Получение расписания для ученика (доступно для тренеров и учеников)
-  router.get(
-    '/schedule/student/:studentId',
-    authMiddleware,
-    roleMiddleware(['coach', 'student']),
-    scheduleController.getSchedule
-  );
+router.get('/schedule/student/:studentId', authMiddleware,roleMiddleware(['coach', 'student']), scheduleController.getSchedule);
   
-  // Обновление записи в расписании (только для тренеров)
-  router.put(
-    '/schedule/:id',
-    authMiddleware,
-    roleMiddleware(['coach']),
-    scheduleController.updateSchedule
-  );
+router.put('/schedule/:id', authMiddleware, roleMiddleware(['coach']), scheduleController.updateSchedule);
   
-  // Удаление записи в расписании (только для тренеров)
-  router.delete(
-    '/schedule/:id',
-    authMiddleware,
-    roleMiddleware(['coach']),
-    scheduleController.deleteSchedule
-  );
+router.delete('/schedule/:id', authMiddleware, roleMiddleware(['coach']), scheduleController.deleteSchedule);
   
+router.get('/auth/profile', authMiddleware, authController.getProfile);
+
+router.put('/auth/profile', authMiddleware, authController.updateProfile);
+
 
 module.exports = router;

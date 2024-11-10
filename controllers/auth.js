@@ -85,34 +85,52 @@ class AuthController {
 
     async updateProfile(req, res) {
         const { firstName, lastName, email, currentPassword, newPassword } = req.body;
+    
         try {
             const userId = req.user.id;
             const user = await User.findById(userId);
-
+        
             if (!user) {
                 return res.status(404).json({ msg: 'Пользователь не найден' });
             }
-
-            if (currentPassword && newPassword) {
+        
+            if (newPassword) {
+                if (!currentPassword) {
+                    return res.status(400).json({ msg: 'Для смены пароля укажите текущий пароль' });
+                }
+                
                 const isMatch = await bcrypt.compare(currentPassword, user.password);
                 if (!isMatch) {
                     return res.status(400).json({ msg: 'Неверный текущий пароль' });
                 }
+    
                 const salt = await bcrypt.genSalt(10);
                 user.password = await bcrypt.hash(newPassword, salt);
             }
-
+        
             if (firstName) user.firstName = firstName;
             if (lastName) user.lastName = lastName;
             if (email) user.email = email;
-
+        
             await user.save();
-            res.json({ msg: 'Данные профиля обновлены' });
+        
+            res.json({
+                msg: 'Данные профиля обновлены',
+                user: {
+                    id: user._id,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    email: user.email,
+                    roles: user.roles,
+                    registrationDate: user.registrationDate
+                }
+            });
         } catch (error) {
             console.error('Ошибка при обновлении профиля:', error);
             res.status(500).json({ msg: 'Ошибка сервера' });
         }
-    }  
+    }
+    
 }
 
 

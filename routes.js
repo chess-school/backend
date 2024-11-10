@@ -46,6 +46,8 @@ router.post('/admin/assign-coach', authMiddleware, roleMiddleware(['admin']), ad
 
 router.post('/admin/remove-role', authMiddleware, roleMiddleware(['admin']), adminController.removeRole);
 
+router.get('/admin/user', authMiddleware, roleMiddleware(['admin']), adminController.getUserDetails);
+
 router.post('/schedule/create', authMiddleware, roleMiddleware(['coach']), scheduleController.createSchedule);
   
 router.get('/schedule/student/:studentId', authMiddleware,roleMiddleware(['coach', 'student']), scheduleController.getSchedule);

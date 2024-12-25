@@ -9,6 +9,11 @@ const StudentSchema = new mongoose.Schema({
 });
 
 const UserSchema = new mongoose.Schema({
+    firebaseUID: {
+        type: String,
+        unique: true,
+        sparse: true,
+    },
     firstName: {
         type: String,
         required: true
@@ -21,6 +26,12 @@ const UserSchema = new mongoose.Schema({
         type: String,
         required: true,
         unique: true
+    },
+    emailVerified: { type: Boolean, 
+        default: false 
+    }, 
+    verificationToken: { 
+        type: String 
     },
     password: {
         type: String,

@@ -1,6 +1,9 @@
 const User = require('../models/User');
+const Player = require('../models/Player');
 const jwt = require('jsonwebtoken');
 const Role = require('../models/Role');
+const { auth } = require('../config/firebase');
+const nodemailer = require('nodemailer');
 const bcrypt = require('bcrypt');
 const { validationResult } = require('express-validator');
 
@@ -13,31 +16,105 @@ const generateAccessToken = (id, roles) => {
 }
 
 class AuthController {
+
+    async firebaseLogin(req, res) {
+        const { idToken } = req.body;
+
+        try {
+            const decodedToken = await auth.verifyIdToken(idToken);
+            const { uid, email, name, email_verified } = decodedToken;
+
+            if (!email_verified) {
+                return res.status(403).json({ msg: 'Email not verified' });
+            }
+
+            let user = await User.findOne({ firebaseUID: uid });
+            if (!user) {
+                const userRole = await Role.findOne({ value: "user" });
+
+                user = new User({
+                    firebaseUID: uid,
+                    email,
+                    firstName: name ? name.split(' ')[0] : 'Unknown',
+                    lastName: name ? name.split(' ')[1] || '' : '',
+                    roles: [userRole.value],
+                });
+                await user.save();
+
+                const player = new Player({
+                    user: user._id,
+                    bullet: {},
+                    blitz: {},
+                    rapid: {},
+                    classic: {},
+                });
+                await player.save();
+            }
+
+            return res.status(200).json({ user, msg: 'OAuth Login successful' });
+        } catch (error) {
+            console.error('Ошибка Firebase Login:', error.message);
+            res.status(403).json({ msg: 'Invalid Firebase token', error: error.message });
+        }
+    }
+
     async registration(req, res) {
         const { firstName, lastName, email, password } = req.body;
     
         try {
             const errors = validationResult(req);
-            if(!errors.isEmpty()) {
-                return res.status(500).send(errors);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({ errors: errors.array() });
             }
+            const userRole = await Role.findOne({value: "user"});
             let user = await User.findOne({ email });
             if (user) {
                 return res.status(400).json({ msg: 'User already exists' });
             }
-            const userRole = await Role.findOne({value: "user"})
-            if (!userRole) {
-                return res.status(400).json({ msg: 'Role not found' });
-            }
-            user = new User({ firstName, lastName, email, password, roles: [userRole.value] });
+    
+            const salt = await bcrypt.genSalt(10);
+            const verificationToken = await bcrypt.hash(Date.now().toString(), salt);
+    
+            user = new User({
+                firstName,
+                lastName,
+                email,
+                password,
+                emailVerified: false,
+                verificationToken,
+                roles: [userRole.value]
+            });
+    
             await user.save();
-
-            const token = generateAccessToken(user._id, user.roles);
-            return res.json({user, token});
+    
+            const transporter = nodemailer.createTransport({
+                host: process.env.MAILTRAP_HOST,
+                port: process.env.MAILTRAP_PORT,
+                auth: {
+                    user: process.env.MAILTRAP_USER,
+                    pass: process.env.MAILTRAP_PASS,
+                },
+            });
+    
+            const verificationUrl = `${process.env.BASE_URL}/auth/verify-email?token=${encodeURIComponent(verificationToken)}`;
+            const mailOptions = {
+                from: '"Chess School" <no-reply@chess-school.com>',
+                to: email,
+                subject: 'Verify your email',
+                html: `<p>Welcome to Chess School!</p>
+                       <p>Please click the link below to verify your email address:</p>
+                       <a href="${verificationUrl}">${verificationUrl}</a>`,
+            };
+    
+            await transporter.sendMail(mailOptions);
+    
+            res.json({ msg: 'Registration successful, please verify your email' });
         } catch (err) {
-            res.status(500).send(err);
+            console.error(err.message);
+            res.status(500).send('Server error');
         }
     }
+    
 
     async login(req, res) {
         const { email, password } = req.body;
@@ -47,16 +124,42 @@ class AuthController {
             if (!user) {
                 return res.status(400).json({ msg: 'User not found' });
             }
-    
+
+            if (!user.emailVerified) {
+                return res.status(400).json({ msg: 'Please verify your email first' });
+            }
+
             const isMatch = await bcrypt.compare(password, user.password);
             if (!isMatch) {
                 return res.status(400).json({ msg: 'Invalid credentials' });
             }
+
             const token = generateAccessToken(user._id, user.roles);
-            return res.json({user, token});
+            return res.json({ user, token });
         } catch (err) {
             console.error(err.message);
             res.status(500).send('Server error');
+        }
+    }
+
+    async verifyEmail(req, res) {
+        const { token } = req.query;
+
+        try {
+            const user = await User.findOne({ verificationToken: token });
+
+            if (!user) {
+                return res.status(400).json({ msg: 'Invalid or expired token' });
+            }
+
+            user.emailVerified = true;
+            user.verificationToken = undefined;
+            await user.save();
+
+            res.json({ msg: 'Email verified successfully' });
+        } catch (error) {
+            console.error('Error verifying email:', error);
+            res.status(500).json({ msg: 'Server error' });
         }
     }
 

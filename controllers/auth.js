@@ -15,6 +15,29 @@ const generateAccessToken = (id, roles) => {
     return jwt.sign(payload, process.env.JWT_SECRET, {expiresIn: "24h"} );
 }
 
+const transporter = nodemailer.createTransport({
+    host: process.env.MAILTRAP_HOST,
+    port: process.env.MAILTRAP_PORT,
+    auth: {
+        user: process.env.MAILTRAP_USER,
+        pass: process.env.MAILTRAP_PASS,
+    },
+});
+
+const sendVerificationEmail = async (email, token) => {
+    const verificationUrl = `${process.env.BASE_URL}/auth/verify-email?token=${encodeURIComponent(token)}`;
+    const mailOptions = {
+        from: '"Chess School" <no-reply@chess-school.com>',
+        to: email,
+        subject: 'Verify your email',
+        html: `<p>Welcome to Chess School!</p>
+               <p>Please confirm your email:</p>
+               <a href="${verificationUrl}">${verificationUrl}</a>`,
+    };
+
+    await transporter.sendMail(mailOptions);
+};
+
 class AuthController {
 
     async firebaseLogin(req, res) {
@@ -66,16 +89,18 @@ class AuthController {
             if (!errors.isEmpty()) {
                 return res.status(400).json({ errors: errors.array() });
             }
-            const userRole = await Role.findOne({value: "user"});
-            let user = await User.findOne({ email });
-            if (user) {
+    
+            const userRole = await Role.findOne({ value: "user" });
+            const existingUser = await User.findOne({ email });
+            if (existingUser) {
                 return res.status(400).json({ msg: 'User already exists' });
             }
     
-            const salt = await bcrypt.genSalt(10);
-            const verificationToken = await bcrypt.hash(Date.now().toString(), salt);
+            const saltRounds = 10;
     
-            user = new User({
+            const verificationToken = await bcrypt.hash(Date.now().toString(), saltRounds);
+    
+            const user = new User({
                 firstName,
                 lastName,
                 email,
@@ -87,75 +112,72 @@ class AuthController {
     
             await user.save();
     
-            const transporter = nodemailer.createTransport({
-                host: process.env.MAILTRAP_HOST,
-                port: process.env.MAILTRAP_PORT,
-                auth: {
-                    user: process.env.MAILTRAP_USER,
-                    pass: process.env.MAILTRAP_PASS,
-                },
+            const player = new Player({
+                user: user._id,
+                bullet: {},
+                blitz: {},
+                rapid: {},
+                classic: {},
             });
     
-            const verificationUrl = `${process.env.BASE_URL}/auth/verify-email?token=${encodeURIComponent(verificationToken)}`;
-            const mailOptions = {
-                from: '"Chess School" <no-reply@chess-school.com>',
-                to: email,
-                subject: 'Verify your email',
-                html: `<p>Welcome to Chess School!</p>
-                       <p>Please click the link below to verify your email address:</p>
-                       <a href="${verificationUrl}">${verificationUrl}</a>`,
-            };
+            await player.save();
     
-            await transporter.sendMail(mailOptions);
+            await sendVerificationEmail(email, verificationToken);
     
-            res.json({ msg: 'Registration successful, please verify your email' });
+            return res.status(201).json({
+                msg: 'Registration successful',
+                email,
+                firstName,
+                lastName,
+                token: encodeURIComponent(verificationToken),
+            });
         } catch (err) {
-            console.error(err.message);
-            res.status(500).send('Server error');
+            console.error('Registration error:', err);
+            return res.status(500).json({ msg: 'Server error' });
         }
     }
     
-
     async login(req, res) {
         const { email, password } = req.body;
-
+    
         try {
             const user = await User.findOne({ email });
             if (!user) {
                 return res.status(400).json({ msg: 'User not found' });
             }
-
+    
             if (!user.emailVerified) {
                 return res.status(400).json({ msg: 'Please verify your email first' });
             }
+            const isPasswordMatch = await bcrypt.compare(password, user.password);
+            console.log(isPasswordMatch)
 
-            const isMatch = await bcrypt.compare(password, user.password);
-            if (!isMatch) {
+            if (!isPasswordMatch) {
                 return res.status(400).json({ msg: 'Invalid credentials' });
             }
-
+    
             const token = generateAccessToken(user._id, user.roles);
-            return res.json({ user, token });
+            return res.status(200).json({ user, token });
         } catch (err) {
-            console.error(err.message);
-            res.status(500).send('Server error');
+            console.error('Login error:', err);
+            return res.status(500).json({ msg: 'Server error' });
         }
     }
-
+    
     async verifyEmail(req, res) {
-        const { token } = req.query;
-
+        const { token } = req.query; 
+    
         try {
-            const user = await User.findOne({ verificationToken: token });
-
+            const user = await User.findOne({ verificationToken: token, emailVerified: false });
+            
             if (!user) {
                 return res.status(400).json({ msg: 'Invalid or expired token' });
             }
-
+    
             user.emailVerified = true;
             user.verificationToken = undefined;
             await user.save();
-
+    
             res.json({ msg: 'Email verified successfully' });
         } catch (error) {
             console.error('Error verifying email:', error);
@@ -163,6 +185,62 @@ class AuthController {
         }
     }
 
+    async resendVerificationEmail(req, res) {
+        const { token } = req.body;
+    
+        try {
+            const user = await User.findOne({ verificationToken: token });
+    
+            if (!user) {
+                return res.status(404).json({ msg: 'User not found or token expired' });
+            }
+    
+            if (user.emailVerified) {
+                return res.status(200).json({ msg: 'Email is already verified.' });
+            }
+    
+            const salt = await bcrypt.genSalt(10);
+            const newToken = await bcrypt.hash(Date.now().toString(), salt);
+            user.verificationToken = newToken;
+    
+            user.lastEmailSent = new Date();
+            await user.save();
+    
+            const verificationUrl = `${process.env.BASE_URL}/auth/verify-email?token=${encodeURIComponent(newToken)}`;
+            const mailOptions = {
+                from: '"Chess School" <no-reply@chess-school.com>',
+                to: user.email,
+                subject: 'Verify your email',
+                html: `<p>Please confirm your email:</p>
+                       <a href="${verificationUrl}">${verificationUrl}</a>`,
+            };
+    
+            await transporter.sendMail(mailOptions);
+    
+            res.json({ msg: 'Verification email resent successfully' });
+        } catch (error) {
+            console.error('Error resending verification email:', error);
+            res.status(500).json({ msg: 'Server error' });
+        }
+    }    
+    
+    async checkVerificationStatus(req, res) {
+        const { token } = req.body;
+      
+        try {
+          const user = await User.findOne({ verificationToken: token });
+      
+          if (!user) {
+            return res.status(404).json({ msg: 'Invalid or expired token' });
+          }
+      
+          return res.json({ emailVerified: user.emailVerified });
+        } catch (error) {
+          console.error('Error checking verification status:', error);
+          res.status(500).json({ msg: 'Server error' });
+        }
+      }   
+      
     async getUsers(req, res) {
         try {
             const users = await User.find();
@@ -190,33 +268,31 @@ class AuthController {
         const { firstName, lastName, email, currentPassword, newPassword } = req.body;
     
         try {
-            const userId = req.user.id;
+            const userId = req.user.id; 
             const user = await User.findById(userId);
-        
+    
             if (!user) {
                 return res.status(404).json({ msg: 'Пользователь не найден' });
             }
-        
+    
             if (newPassword) {
                 if (!currentPassword) {
                     return res.status(400).json({ msg: 'Для смены пароля укажите текущий пароль' });
                 }
-                
+    
                 const isMatch = await bcrypt.compare(currentPassword, user.password);
                 if (!isMatch) {
                     return res.status(400).json({ msg: 'Неверный текущий пароль' });
                 }
-    
-                const salt = await bcrypt.genSalt(10);
-                user.password = await bcrypt.hash(newPassword, salt);
+                user.password = newPassword; 
             }
-        
+    
             if (firstName) user.firstName = firstName;
             if (lastName) user.lastName = lastName;
             if (email) user.email = email;
-        
+    
             await user.save();
-        
+    
             res.json({
                 msg: 'Данные профиля обновлены',
                 user: {
@@ -225,15 +301,14 @@ class AuthController {
                     lastName: user.lastName,
                     email: user.email,
                     roles: user.roles,
-                    registrationDate: user.registrationDate
-                }
+                    registrationDate: user.registrationDate,
+                },
             });
         } catch (error) {
             console.error('Ошибка при обновлении профиля:', error);
             res.status(500).json({ msg: 'Ошибка сервера' });
         }
     }
-    
 }
 
 

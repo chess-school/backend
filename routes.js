@@ -4,6 +4,7 @@ const adminController = require('./controllers/admin');
 const scheduleController = require('./controllers/schedule');
 const gameController = require('./controllers/game');
 const playerController = require('./controllers/player');
+const puzzleController = require('./controllers/puzzles');
 const express = require('express');
 const { check } = require('express-validator');
 const passport = require('passport');
@@ -31,6 +32,8 @@ router.get(
 
 router.post('/auth/login', authController.login);
 router.get('/auth/verify-email', authController.verifyEmail);
+router.post('/auth/resend-verification', authController.resendVerificationEmail);
+router.post('/auth/check-verification', authController.checkVerificationStatus);
 router.post('/auth/firebase-login', authController.firebaseLogin);
 
 router.get('/users', roleMiddleware(['admin']), authController.getUsers);
@@ -73,5 +76,21 @@ router.post('/games/:gameId/accept', authMiddleware, gameController.acceptChalle
 router.get('/games/:gameId', authMiddleware, gameController.getGame); // Получить данные об игре
 // router.post('/games/:gameId/move', authMiddleware, gameController.makeMove); // Сделать ход
 router.post('/games/:gameId/finish', authMiddleware, gameController.finishGame); // Завершить игру
+
+
+// Пазлы и подборки
+router.post('/puzzles', authMiddleware, roleMiddleware(['coach', 'admin']), puzzleController.createPuzzle); // Создать пазл
+
+router.delete('/puzzles/:puzzleId', authMiddleware, roleMiddleware(['coach', 'admin']), puzzleController.deletePuzzle); // Удалить пазл
+
+router.put('/puzzles/:puzzleId', authMiddleware, roleMiddleware(['coach', 'admin']), puzzleController.updatePuzzle); // Обновить пазл
+
+router.post('/collections', authMiddleware, roleMiddleware(['coach', 'admin']), puzzleController.createCollection); // Создать подборку
+
+router.delete('/collections/:collectionId', authMiddleware, roleMiddleware(['coach', 'admin']), puzzleController.deleteCollection); // Удалить подборку
+
+router.put('/collections/:collectionId', authMiddleware, roleMiddleware(['coach', 'admin']), puzzleController.updateCollection); // Обновить подборку
+
+router.get('/collections/:collectionId/puzzles', authMiddleware, roleMiddleware(['coach', 'admin']), puzzleController.getCollectionPuzzles); // Получить пазлы из подборки
 
 module.exports = router;

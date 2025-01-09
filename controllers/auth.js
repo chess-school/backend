@@ -205,17 +205,8 @@ class AuthController {
     
             user.lastEmailSent = new Date();
             await user.save();
-    
-            const verificationUrl = `${process.env.BASE_URL}/auth/verify-email?token=${encodeURIComponent(newToken)}`;
-            const mailOptions = {
-                from: '"Chess School" <no-reply@chess-school.com>',
-                to: user.email,
-                subject: 'Verify your email',
-                html: `<p>Please confirm your email:</p>
-                       <a href="${verificationUrl}">${verificationUrl}</a>`,
-            };
-    
-            await transporter.sendMail(mailOptions);
+
+            await sendVerificationEmail(email, verificationToken);
     
             res.json({ msg: 'Verification email resent successfully' });
         } catch (error) {

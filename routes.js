@@ -1,4 +1,5 @@
 const authController = require('./controllers/auth');
+const notificationsController = require('./controllers/notifications');
 const coachController = require('./controllers/coach');
 const adminController = require('./controllers/admin');
 const scheduleController = require('./controllers/schedule');
@@ -44,8 +45,20 @@ router.put('/auth/profile', authMiddleware, authController.updateProfile);
 // Тренеры
 router.post('/trainer/assign-student', authMiddleware, roleMiddleware(['admin', 'coach']), coachController.assignStudent);
 router.get('/trainer/students', authMiddleware, roleMiddleware(['coach', 'admin']), coachController.getStudents);
+router.get('/coaches',  coachController.getCoaches);
 router.delete('/trainer/remove-student', authMiddleware, roleMiddleware(['coach', 'admin']), coachController.removeStudent);
 router.get('/trainer/student', authMiddleware, roleMiddleware(['coach', 'admin']), coachController.getStudentById);
+
+// Заявки от учеников
+router.post('/trainer/request', authMiddleware, coachController.createRequest);
+router.get('/trainer/requests', authMiddleware, roleMiddleware(['coach', 'admin']), coachController.getRequests);
+router.patch('/trainer/request', authMiddleware, roleMiddleware(['coach', 'admin']), coachController.handleRequest);
+
+// Уведомления
+router.post('/notifications', authMiddleware, notificationsController.createNotification);
+router.get('/notifications', authMiddleware, notificationsController.getNotifications);
+router.patch('/notifications', authMiddleware, notificationsController.markAsRead);
+router.delete('/notifications', authMiddleware, notificationsController.deleteNotification);
 
 // Администратор
 router.post('/assign-user-to-student', authMiddleware, roleMiddleware(['admin']), adminController.assignStudent);

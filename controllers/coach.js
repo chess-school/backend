@@ -1,247 +1,244 @@
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const Request = require('../models/Request');
+const errorHandler = require('../middleware/errorHandler');
+const { findUserByEmail, findUserById, checkUserRole } = require('../utils/userUtils');
 
-class CoachController {
-    async assignStudent(req, res) {
-        const { coachEmail, studentEmail } = req.body;
+// 🔁 1. Обновление coach-профиля
+const updateCoachProfile = errorHandler(async (req, res) => {
+  const user = await User.findById(req.user.id);
+  if (!user || !user.roles.includes('coach')) {
+    return res.status(403).json({ msg: 'Access denied' });
+  }
 
-        try {
-            const coach = await User.findOne({ email: coachEmail });
-            if (!coach || !coach.roles.includes('coach')) {
-                return res.status(400).json({ msg: 'Invalid coach' });
-            }
+  user.coachProfile = {
+    ...user.coachProfile,
+    title: req.body.title || user.coachProfile?.title || '',
+    experience: req.body.experience || user.coachProfile?.experience || '',
+    bio: req.body.bio || user.coachProfile?.bio || '',
+    price: req.body.price ?? user.coachProfile?.price,
+    services: Array.isArray(req.body.services) ? req.body.services : user.coachProfile?.services || [],
+  };
 
-            const student = await User.findOne({ email: studentEmail });
-            if (!student || !student.roles.includes('student')) {
-                return res.status(400).json({ msg: 'Invalid student' });
-            }
+  await user.save();
 
-            student.trainer = coach._id;
-            student.trainerEmail = coach.email;
-            await student.save();
+  res.json({
+    msg: 'Coach profile updated',
+    coachProfile: user.coachProfile,
+  });
+});
 
-            const studentExists = coach.students.find(s => s.toString() === student._id.toString());
-            if (!studentExists) {
-                coach.students.push(student._id);
-                await coach.save();
-            }
+// 🔁 2. Назначить студента тренеру
+const assignStudent = errorHandler(async (req, res) => {
+  const { coachEmail, studentEmail } = req.body;
+  const coach = await findUserByEmail(coachEmail);
+  checkUserRole(coach, 'coach');
 
-            res.json({ msg: 'Student assigned to coach successfully' });
-        } catch (err) {
-            console.error(err);
-            res.status(500).send('Server error');
-        }
+  let student = await findUserByEmail(studentEmail);
+  if (!student.roles.includes('student')) {
+    student = await User.findOneAndUpdate(
+      { email: studentEmail },
+      { $addToSet: { roles: 'student' } },
+      { new: true }
+    );
+  }
+
+  student.trainer = coach._id;
+  student.trainerEmail = coach.email;
+  await student.save();
+
+  if (!coach.students.includes(student._id)) {
+    coach.students.push(student._id);
+    await coach.save();
+  }
+
+  res.json({ msg: 'Student assigned to coach successfully', student });
+});
+
+// 🔁 3. Получить всех тренеров
+const getCoaches = errorHandler(async (req, res) => {
+  const coaches = await User.find({ roles: 'coach' }).select('-password');
+
+  const formatted = coaches.map(coach => ({
+    ...coach.toObject(),
+    photoUrl: coach.avatar?.data
+      ? `${process.env.BASE_URL}/auth/avatar/${coach._id}`
+      : null,
+  }));
+
+  res.status(200).json(formatted);
+});
+
+// 🔁 4. Получить тренеров по email
+const getCoachesByEmail = errorHandler(async (req, res) => {
+  const { emails } = req.body;
+
+  if (!Array.isArray(emails) || emails.length === 0) {
+    return res.status(400).json({ msg: 'Invalid email list' });
+  }
+
+  const coaches = await User.find({ email: { $in: emails } }).select('-password');
+
+  const formatted = coaches.map(coach => ({
+    _id: coach._id,
+    firstName: coach.firstName,
+    lastName: coach.lastName,
+    email: coach.email,
+    roles: coach.roles,
+    photoUrl: coach.avatar?.data
+      ? `${process.env.BASE_URL}/auth/avatar/${coach._id}`
+      : null,
+  }));
+
+  res.json(formatted);
+});
+
+// 🔁 5. Получить студентов тренера
+const getStudents = errorHandler(async (req, res) => {
+  const { coachEmail } = req.query;
+  const coach = await findUserByEmail(coachEmail);
+  checkUserRole(coach, 'coach');
+
+  res.json(coach.students);
+});
+
+// 🔁 6. Удалить студента у тренера
+const removeStudent = errorHandler(async (req, res) => {
+  const { coachEmail, studentId } = req.query;
+  const coach = await findUserByEmail(coachEmail);
+  checkUserRole(coach, 'coach');
+
+  const student = await findUserById(studentId);
+  if (student.trainer?.toString() !== coach._id.toString()) {
+    return res.status(400).json({ msg: 'Student not assigned to this coach' });
+  }
+
+  student.trainer = null;
+  student.trainerEmail = null;
+  await student.save();
+
+  coach.students = coach.students.filter(s => s.toString() !== studentId);
+  await coach.save();
+
+  res.json({ msg: 'Student removed successfully' });
+});
+
+// 🔁 7. Получить тренера по ID
+const getCoachById = errorHandler(async (req, res) => {
+  const { id } = req.params;
+  const coach = await findUserById(id);
+  res.json(coach);
+});
+
+// 🔁 8. Получить студента по ID
+const getStudentById = errorHandler(async (req, res) => {
+  const { coachEmail, studentId } = req.query;
+  const coach = await findUserByEmail(coachEmail);
+  checkUserRole(coach, 'coach');
+
+  const student = await findUserById(studentId);
+  if (student.trainer.toString() !== coach._id.toString()) {
+    return res.status(404).json({ msg: 'Student not assigned to this coach' });
+  }
+
+  res.json(student);
+});
+
+// 🔁 9. Получить заявки тренеру
+const getRequests = errorHandler(async (req, res) => {
+  const coachId = req.user.id;
+  const requests = await Request.find({ coach: coachId })
+    .populate('student', 'firstName lastName email')
+    .select('student experience goals createdAt status');
+
+  res.status(200).json(requests);
+});
+
+// 🔁 10. Создать заявку
+const createRequest = errorHandler(async (req, res) => {
+  const studentId = req.user.id;
+  const { coachId, experience, goals } = req.body;
+
+  const existingRequest = await Request.findOne({
+    student: studentId,
+    coach: coachId,
+    status: 'pending',
+  });
+
+  if (existingRequest) {
+    return res.status(400).json({ msg: 'Request already sent' });
+  }
+
+  const newRequest = new Request({ student: studentId, coach: coachId, experience, goals });
+  await newRequest.save();
+
+  // 📬 Создать уведомление для тренера
+  await new Notification({
+    recipient: coachId,
+    type: 'request',
+    content: 'Новая заявка от студента',
+    metadata: {
+      studentId,
+      requestId: newRequest._id,
+    },
+  }).save();
+
+  res.status(201).json({ msg: 'Request successfully sent' });
+});
+
+// 🔁 11. Обработка заявки
+const handleRequest = errorHandler(async (req, res) => {
+  const { request_id } = req.query;
+  const { status } = req.body;
+
+  if (!['approved', 'rejected'].includes(status)) {
+    return res.status(400).json({ msg: 'Invalid status' });
+  }
+
+  const request = await Request.findById(request_id).populate('student coach');
+  if (!request) return res.status(404).json({ msg: 'Request not found' });
+
+  request.status = status;
+  await request.save();
+
+  if (status === 'approved') {
+    const student = request.student;
+    const coach = request.coach;
+
+    if (!coach || !student) {
+      return res.status(400).json({ msg: 'Invalid coach or student data' });
     }
 
-    async getCoaches(req, res) {
-        try {
-          const coaches = await User.find({ roles: 'coach' }).select('-password');;
-          
-          if (!coaches || coaches.length === 0) {
-            return res.status(404).json({ msg: 'No coaches found' });
-          }
-      
-          res.status(200).json(coaches);
-        } catch (error) {
-          console.error('Ошибка при получении списка тренеров:', error);
-          res.status(500).json({ msg: 'Server error' });
-        }
-      }
+    if (!coach.students.includes(student._id)) {
+      student.trainer = coach._id;
+      student.trainerEmail = coach.email;
+      await student.save();
 
-    async getStudents(req, res) {
-        const { coachEmail } = req.query;
-
-        if (!coachEmail) {
-            return res.status(400).json({ msg: 'Coach email is required' });
-        }
-
-        try {
-            const coach = await User.findOne({ email: coachEmail }).populate('students');
-            if (!coach || !coach.roles.includes('coach')) {
-                return res.status(404).json({ msg: 'Coach not found' });
-            }
-
-            res.json(coach.students);
-        } catch (err) {
-            console.error(err);
-            res.status(500).send('Server error');
-        }
+      coach.students.push(student._id);
+      await coach.save();
     }
+  }
 
-    async removeStudent(req, res) {
-        const { coachEmail, studentId } = req.query;
-    
-        if (!coachEmail || !studentId) {
-            return res.status(400).json({ msg: 'Coach email and student ID are required' });
-        }
-    
-        try {
-            const coach = await User.findOne({ email: coachEmail }).populate('students');
-            if (!coach || !coach.roles.includes('coach')) {
-                return res.status(404).json({ msg: 'Coach not found' });
-            }
-    
-            const student = await User.findById(studentId);
-            if (!student) {
-                return res.status(404).json({ msg: 'Student not found' });
-            }
-    
-            if (student.trainer?.toString() !== coach._id.toString()) {
-                return res.status(400).json({ msg: 'Student not assigned to this coach' });
-            }
-    
-            student.trainer = null;
-            student.trainerEmail = null;
-            await student.save();
-    
-            coach.students = coach.students.filter(s => s._id.toString() !== studentId);
-            await coach.save();
-    
-            return res.json({ msg: 'Student removed successfully' });
-        } catch (err) {
-            console.error(err);
-            return res.status(500).json({ msg: 'Server error' });
-        }
-    }
-    
+  await new Notification({
+    recipient: request.student._id,
+    type: 'statusUpdate',
+    content: `Your request was ${status === 'approved' ? 'approved' : 'rejected'}`,
+    metadata: { requestId: request_id },
+  }).save();
 
-    async getStudentById(req, res) {
-        const { coachEmail, studentId } = req.query;
+  res.status(200).json({ msg: `Request ${status}` });
+});
 
-        if (!coachEmail || !studentId) {
-            return res.status(400).json({ msg: 'Coach email and student ID are required' });
-        }
-
-        try {
-            const coach = await User.findOne({ email: coachEmail });
-            if (!coach || !coach.roles.includes('coach')) {
-                return res.status(404).json({ msg: 'Coach not found' });
-            }
-
-            const student = await User.findById(studentId);
-            if (!student || student.trainer.toString() !== coach._id.toString()) {
-                return res.status(404).json({ msg: 'Student not assigned to this coach' });
-            }
-
-            res.json(student);
-        } catch (err) {
-            console.error(err);
-            res.status(500).send('Server error');
-        }
-    }
-
-    async getRequests(req, res) {
-        try {
-          const coachId = req.user.id;
-      
-          const requests = await Request.find({ coach: coachId }).populate('student', 'firstName lastName email');
-          res.status(200).json(requests);
-        } catch (error) {
-          console.error('Ошибка при получении заявок:', error);
-          res.status(500).json({ msg: 'Ошибка сервера' });
-        }
-      }
-    
-      async createRequest(req, res) {
-        console.log(req)
-        try {
-            const studentId = req.user.id;
-            const { coachId } = req.body;
-    
-            console.log('studentId:', studentId);
-            console.log('coachId:', coachId);
-    
-            const existingRequest = await Request.findOne({ student: studentId, coach: coachId, status: 'pending' });
-            console.log('existingRequest:', existingRequest);
-    
-            if (existingRequest) {
-                return res.status(400).json({ msg: 'Заявка уже отправлена' });
-            }
-    
-            const newRequest = new Request({
-                student: studentId,
-                coach: coachId,
-            });
-    
-            console.log('newRequest:', newRequest);
-    
-            await newRequest.save();
-    
-            const notification = new Notification({
-                recipient: coachId,
-                type: 'request',
-                content: `Новая заявка от студента ${req.user.firstName} ${req.user.lastName}`,
-                metadata: { requestId: newRequest._id },
-            });
-    
-            console.log('notification:', notification);
-    
-            await notification.save();
-    
-            res.status(201).json({ msg: 'Заявка успешно отправлена' });
-        } catch (error) {
-            console.error('Ошибка при создании заявки:', error);
-            res.status(500).json({ msg: 'Ошибка сервера' });
-        }
-    }    
-
-    async handleRequest(req, res) {
-        try {
-            const { request_id } = req.query; 
-            const { status } = req.body; 
-    
-            if (!request_id) {
-                return res.status(400).json({ msg: 'Не передан идентификатор заявки' });
-            }
-    
-            if (!['approved', 'rejected'].includes(status)) {
-                return res.status(400).json({ msg: 'Некорректный статус' });
-            }
-    
-            const request = await Request.findById(request_id).populate('student coach');
-            if (!request) {
-                return res.status(404).json({ msg: 'Заявка не найдена' });
-            }
-    
-            request.status = status;
-            await request.save();
-    
-            if (status === 'approved') {
-                const student = request.student;
-                const coach = request.coach;
-    
-                if (!coach || !student) {
-                    return res.status(400).json({ msg: 'Ошибка при получении данных тренера или ученика' });
-                }
-    
-                const studentExists = coach.students.some(s => s.toString() === student._id.toString());
-                if (!studentExists) {
-                    student.trainer = coach._id;
-                    student.trainerEmail = coach.email;
-                    await student.save();
-    
-                    coach.students.push(student._id);
-                    await coach.save();
-                }
-            }
-    
-            const notification = new Notification({
-                recipient: request.student._id,
-                type: 'statusUpdate',
-                content: `Ваша заявка была ${status === 'approved' ? 'одобрена' : 'отклонена'}`,
-                metadata: { requestId: request_id },
-            });
-            await notification.save();
-    
-            res.status(200).json({ msg: `Заявка ${status === 'approved' ? 'принята' : 'отклонена'}` });
-        } catch (error) {
-            console.error('Ошибка при обработке заявки:', error);
-            res.status(500).json({ msg: 'Ошибка сервера' });
-        }
-    }
-    
-    
-}
-
-module.exports = new CoachController();
+module.exports = {
+  updateCoachProfile,
+  assignStudent,
+  getCoaches,
+  getCoachesByEmail,
+  getStudents,
+  removeStudent,
+  getCoachById,
+  getStudentById,
+  getRequests,
+  createRequest,
+  handleRequest,
+};

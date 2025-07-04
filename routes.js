@@ -2,75 +2,209 @@ const authController = require('./controllers/auth');
 const notificationsController = require('./controllers/notifications');
 const coachController = require('./controllers/coach');
 const adminController = require('./controllers/admin');
+const savedGames = require('./controllers/savedGame');
 const scheduleController = require('./controllers/schedule');
 const gameController = require('./controllers/game');
 const playerController = require('./controllers/player');
 const puzzleController = require('./controllers/puzzles');
 const express = require('express');
 const { check } = require('express-validator');
-const passport = require('passport');
 const router = express.Router();
 const authMiddleware = require('./middleware/auth');
 const roleMiddleware = require('./middleware/role');
+const validateRequest = require('./middleware/validateRequest');
+const upload = require('./middleware/upload');
 
-// Аутентификация
-router.post('/auth/register', [
-    check('firstName', "Firstname cannot be empty").notEmpty(),
-    check('lastName', "Lastname cannot be empty").notEmpty(),
-    check('email', "Email cannot be empty").notEmpty(),
-    check('password', "Password name cannot be empty").isLength({ min: 8, max: 20 }),
-], authController.registration);
-
-router.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-
-router.get(
-    '/auth/google/callback',
-    passport.authenticate('google', { failureRedirect: '/auth/login' }),
-    (req, res) => {
-        res.redirect('/auth/profile');
-    }
+//Auth
+router.post(
+    '/auth/register',
+    validateRequest(['firstName', 'lastName', 'email', 'password']),
+    check('password', "Password must be between 8 and 20 characters").isLength({ min: 8, max: 20 }),
+    authController.registration
 );
 
-router.post('/auth/login', authController.login);
-router.get('/auth/verify-email', authController.verifyEmail);
-router.post('/auth/resend-verification', authController.resendVerificationEmail);
-router.post('/auth/check-verification', authController.checkVerificationStatus);
-router.post('/auth/firebase-login', authController.firebaseLogin);
+router.post(
+    '/auth/login',
+    validateRequest(['email', 'password']),
+    authController.login
+);
 
-router.get('/users', roleMiddleware(['admin']), authController.getUsers);
+router.get(
+    '/auth/verify-email',
+    validateRequest(['token']),
+    authController.verifyEmail
+);
 
-router.get('/auth/profile', authMiddleware, authController.getProfile);
-router.put('/auth/profile', authMiddleware, authController.updateProfile);
+router.post(
+    '/auth/resend-verification',
+    validateRequest(['token']),
+    authController.resendVerificationEmail
+);
+
+router.post(
+    '/auth/check-verification',
+    validateRequest(['token']),
+    authController.checkVerificationStatus
+);
+
+router.get(
+    '/users',
+    authMiddleware,
+    roleMiddleware(['admin']),
+    authController.getUsers
+);
+
+router.get(
+    '/auth/avatar/:id',
+    authController.getAvatar
+  );  
+
+router.get(
+    '/auth/profile',
+    authMiddleware,
+    authController.getProfile
+);
+
+router.put(
+    '/auth/profile',
+    authMiddleware,
+    upload.single('avatar'),
+    authController.updateProfile
+  );  
 
 // Тренеры
-router.post('/trainer/assign-student', authMiddleware, roleMiddleware(['admin', 'coach']), coachController.assignStudent);
-router.get('/trainer/students', authMiddleware, roleMiddleware(['coach', 'admin']), coachController.getStudents);
-router.get('/coaches',  coachController.getCoaches);
-router.delete('/trainer/remove-student', authMiddleware, roleMiddleware(['coach', 'admin']), coachController.removeStudent);
-router.get('/trainer/student', authMiddleware, roleMiddleware(['coach', 'admin']), coachController.getStudentById);
+router.post(
+    '/trainer/assign-student',
+    authMiddleware,
+    roleMiddleware(['admin', 'coach']),
+    validateRequest(['coachEmail', 'studentEmail']),
+    coachController.assignStudent
+);
 
-// Заявки от учеников
-router.post('/trainer/request', authMiddleware, coachController.createRequest);
-router.get('/trainer/requests', authMiddleware, roleMiddleware(['coach', 'admin']), coachController.getRequests);
-router.patch('/trainer/request', authMiddleware, roleMiddleware(['coach', 'admin']), coachController.handleRequest);
+router.get(
+    '/trainer/students',
+    authMiddleware,
+    roleMiddleware(['coach', 'admin']),
+    validateRequest(['coachEmail']),
+    coachController.getStudents
+);
 
-// Уведомления
-router.post('/notifications', authMiddleware, notificationsController.createNotification);
-router.get('/notifications', authMiddleware, notificationsController.getNotifications);
-router.patch('/notifications', authMiddleware, notificationsController.markAsRead);
-router.delete('/notifications', authMiddleware, notificationsController.deleteNotification);
+router.get('/coaches', coachController.getCoaches);
 
-// Администратор
-router.post('/assign-user-to-student', authMiddleware, roleMiddleware(['admin']), adminController.assignStudent);
-router.post('/admin/assign-coach', authMiddleware, roleMiddleware(['admin']), adminController.assignCoach);
-router.post('/admin/remove-role', authMiddleware, roleMiddleware(['admin']), adminController.removeRole);
-router.get('/admin/user', authMiddleware, roleMiddleware(['admin']), adminController.getUserDetails);
+router.put(
+    '/coach/profile', 
+    authMiddleware,
+    roleMiddleware(['coach', 'admin']), 
+    coachController.updateCoachProfile
+);
+
+router.post('/auth/coaches-by-email', coachController.getCoachesByEmail);
+
+router.get('/coach/:id', validateRequest(['id']), coachController.getCoachById);
+
+router.delete(
+    '/trainer/remove-student',
+    authMiddleware,
+    roleMiddleware(['coach', 'admin']),
+    validateRequest(['coachEmail', 'studentId']),
+    coachController.removeStudent
+);
+
+router.get(
+    '/trainer/student',
+    authMiddleware,
+    roleMiddleware(['coach', 'admin']),
+    validateRequest(['coachEmail', 'studentId']),
+    coachController.getStudentById
+);
+
+router.get(
+    '/trainer/requests',
+    authMiddleware,
+    roleMiddleware(['coach', 'admin']),
+    coachController.getRequests
+);
+
+router.post(
+    '/trainer/request', 
+    authMiddleware, 
+    validateRequest(['coachId', 'experience', 'goals']), 
+    coachController.createRequest
+);
+
+router.patch(
+    '/trainer/request',
+    authMiddleware,
+    roleMiddleware(['coach', 'admin']),
+    validateRequest(['request_id', 'status']),
+    coachController.handleRequest
+);
+
+//Notifications
+router.post('/notifications', 
+    authMiddleware, 
+    validateRequest(['recipient', 'type', 'content']), 
+    notificationsController.createNotification
+);
+
+router.get('/notifications', 
+    authMiddleware, 
+    notificationsController.getNotifications
+);
+
+router.patch('/notifications', 
+    authMiddleware, 
+    validateRequest(['notification_id']), 
+    notificationsController.markAsRead
+);
+
+router.delete('/notifications', 
+    authMiddleware, 
+    validateRequest(['notification_id']), 
+    notificationsController.deleteNotification
+);
+
+//Admin
+router.put('/admin/update-role', 
+    authMiddleware, 
+    roleMiddleware(['admin']), 
+    validateRequest(['userEmail', 'role', 'action']), 
+    adminController.updateUserRole
+);
+
+router.get('/admin/user', 
+    authMiddleware, 
+    roleMiddleware(['admin']), 
+    validateRequest(['userId']), 
+    adminController.getUserDetails
+);
+
+router.get('/admins',
+    adminController.getAdmins
+);
+
+router.post('/save-game', 
+    authMiddleware, 
+    // roleMiddleware(['coach', 'admin']),
+    // validateRequest(['studentId', 'pgn']), 
+    savedGames.saveGameForStudent
+);
+
+
+router.get('/my-games', 
+    authMiddleware, 
+    savedGames.getMySavedGames
+);
 
 // Расписания
 router.post('/schedule/create', authMiddleware, roleMiddleware(['coach']), scheduleController.createSchedule);
 router.get('/schedule/student/:studentId', authMiddleware, roleMiddleware(['coach', 'student']), scheduleController.getSchedule);
+router.get('/schedule/coach', authMiddleware, roleMiddleware(['coach']), scheduleController.getCoachSchedule);
+router.get('/schedule/date', authMiddleware, scheduleController.getScheduleByDate);
 router.put('/schedule/:id', authMiddleware, roleMiddleware(['coach']), scheduleController.updateSchedule);
+router.patch('/schedule/:id/complete', authMiddleware, roleMiddleware(['coach']), scheduleController.markComplete);
 router.delete('/schedule/:id', authMiddleware, roleMiddleware(['coach']), scheduleController.deleteSchedule);
+router.delete('/schedule/student/:studentId', authMiddleware, roleMiddleware(['coach']), scheduleController.deleteStudentSchedule);
 
 // Игроки
 router.get('/player/:playerId', authMiddleware, playerController.getPlayer);

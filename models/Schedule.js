@@ -19,13 +19,23 @@ const ScheduleSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  notes: {
-    type: String
+  description: {
+    type: String,
+    default: ''
+  },
+  link: {
+    type: String,
+    default: ''
   },
   status: {
     type: String,
     enum: ['scheduled', 'completed', 'missed'],
     default: 'scheduled'
+  },
+  type: {
+    type: String,
+    enum: ['individual_lesson', 'group_lesson', 'homework', 'opening_study', 'tournament_participation'],
+    default: 'individual_lesson'
   }
 }, { timestamps: true });
 

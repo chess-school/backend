@@ -37,18 +37,28 @@ const UserSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-    roles: [{
-        type: String,
-        ref: 'Role',
-        default: 'user'
-    }],
+    roles: {
+        type: [String],
+        default: []
+    },
     students: [StudentSchema],
     trainer: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
     },
+    avatar: {
+        data: Buffer,
+        contentType: String,
+    },      
     trainerEmail: {
         type: String
+    },
+    coachProfile: {
+        title: { type: String, default: '' },
+        experience: { type: String, default: '' },
+        bio: { type: String, default: '' },
+        price: { type: Number, default: 0 },
+        services: { type: [String], default: [] }
     },
     registrationDate: {
         type: Date,

@@ -1,109 +1,64 @@
 const User = require('../models/User');
+const { findUserByEmail } = require('../utils/userUtils');
+const errorHandler = require('../middleware/errorHandler');
 
-class AdminController {
-    async assignStudent(req, res) {
-        const { userEmail } = req.body;
+// 🔁 1. Обновить роль пользователя
+const updateUserRole = errorHandler(async (req, res) => {
+  const { userEmail, role, action } = req.body;
 
-        try {
-            const user = await User.findOne({ email: userEmail });
-            if (!user) {
-                return res.status(400).json({ msg: 'User not found' });
-            }
+  const user = await findUserByEmail(userEmail);
 
-            if (user.roles.includes('student')) {
-                return res.status(400).json({ msg: 'User is already a student' });
-            }
-
-            user.roles.push('student');
-            await user.save();
-
-            res.json({ msg: 'User assigned as student successfully' });
-        } catch (err) {
-            console.error(err);
-            res.status(500).send('Server error');
-        }
+  if (action === 'add') {
+    if (user.roles.includes(role)) {
+      return res.status(400).json({ msg: 'User already has this role' });
     }
-
-    async assignCoach(req, res) {
-        const { userEmail } = req.body;
-
-        try {
-            const user = await User.findOne({ email: userEmail });
-            if (!user) {
-                return res.status(400).json({ msg: 'User not found' });
-            }
-
-            if (user.roles.includes('coach')) {
-                return res.status(400).json({ msg: 'User is already a coach' });
-            }
-
-            user.roles.push('coach');
-            await user.save();
-
-            res.json({ msg: 'User assigned as coach successfully' });
-        } catch (err) {
-            console.error(err);
-            res.status(500).send('Server error');
-        }
+    user.roles.push(role);
+  } else if (action === 'remove') {
+    if (!user.roles.includes(role)) {
+      return res.status(400).json({ msg: `User does not have role: ${role}` });
     }
+    user.roles = user.roles.filter(r => r !== role);
+  } else {
+    return res.status(400).json({ msg: 'Invalid action' });
+  }
 
-    async removeRole(req, res) {
-        const { userEmail, role } = req.body; 
+  await user.save();
+  res.json({ msg: `Role ${role} ${action === 'add' ? 'added' : 'removed'} successfully` });
+});
 
-        try {
-            const user = await User.findOne({ email: userEmail });
-            if (!user) {
-                return res.status(400).json({ msg: 'User not found' });
-            }
+// 🔁 2. Получить детали пользователя по ID
+const getUserDetails = errorHandler(async (req, res) => {
+  const user = await User.findById(req.query.userId).select('+password');
+  if (!user) {
+    return res.status(404).json({ msg: 'User not found' });
+  }
 
-            if (!user.roles.includes(role)) {
-                return res.status(400).json({ msg: `User does not have the role: ${role}` });
-            }
+  res.json({
+    id: user._id,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    email: user.email,
+    password: user.password,
+    roles: user.roles,
+    students: user.students,
+    trainer: user.trainer,
+    trainerEmail: user.trainerEmail,
+    createdAt: user.createdAt,
+  });
+});
 
-            user.roles = user.roles.filter(userRole => userRole !== role);
-            await user.save();
+// 🔁 3. Получить всех админов
+const getAdmins = errorHandler(async (req, res) => {
+  const admins = await User.find({ roles: 'admin' }).select('-password');
+  if (!admins.length) {
+    return res.status(404).json({ msg: 'No admins found' });
+  }
 
-            res.json({ msg: `Role ${role} removed successfully from user` });
-        } catch (err) {
-            console.error(err);
-            res.status(500).send('Server error');
-        }
-    }
+  res.status(200).json(admins);
+});
 
-    async getUserDetails(req, res) {
-        const { userId } = req.query; 
-
-        if (!userId) {
-            return res.status(400).json({ message: 'User ID is required' });
-        }
-
-        try {
-            if (!req.user || !req.user.roles.includes('admin')) {
-                return res.status(403).json({ message: 'Доступ запрещен' });
-            }
-
-            const user = await User.findById(userId).select('+password');
-            if (!user) {
-                return res.status(404).json({ message: 'Пользователь не найден' });
-            }
-
-            res.json({
-                id: user._id,
-                firstName: user.firstName,
-                lastName: user.lastName,
-                email: user.email,
-                password: user.password,
-                roles: user.roles,
-                students: user.students,
-                trainer: user.trainer,
-                trainerEmail: user.trainerEmail,
-                createdAt: user.createdAt
-            });
-        } catch (error) {
-            console.error('Ошибка при получении данных пользователя:', error);
-            res.status(500).json({ message: 'Ошибка сервера' });
-        }
-    }
-}
-
-module.exports = new AdminController();
+module.exports = {
+  updateUserRole,
+  getUserDetails,
+  getAdmins,
+};

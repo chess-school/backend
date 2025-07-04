@@ -47,7 +47,7 @@ const PlayerSchema = new mongoose.Schema({
     },
     activeGame: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Game', // Ссылка на текущую игру (если есть)
+        ref: 'Game',
         default: null
     },
     games: [

@@ -96,12 +96,15 @@ const registration = errorHandler(async (req, res) => {
 
 // 🔐 Login
 const login = errorHandler(async (req, res) => {
-  const user = await User.findOne({ email: req.body.email });
+  const email = req.body.email.trim().toLowerCase();
+  const password = req.body.password;
+
+  const user = await User.findOne({ email: email });
   if (!user) return res.status(400).json({ msg: 'User not found' });
 
   if (!user.emailVerified) return res.status(400).json({ msg: 'Please verify your email first' });
 
-  const isPasswordMatch = await bcrypt.compare(req.body.password, user.password);
+  const isPasswordMatch = await bcrypt.compare(password, user.password);
   if (!isPasswordMatch) return res.status(400).json({ msg: 'Invalid credentials' });
 
   const token = generateAccessToken(user._id, user.roles);

@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "scripts": {
-    "dev": "nodemon server.js",
-    "build": "mkdir functions\\build && copyfiles config/** controllers/** middleware/** models/** routes.js server.js .env chess-online-bca59-firebase-adminsdk-zt8tv-c673d17c6b.json functions/build",
-    "deploy": "cd functions && firebase deploy --only functions"
+  "engines": {
+  "node": ">=18.0.0"
+},
+"scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
   },
   "keywords": [],
   "author": "",

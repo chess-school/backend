@@ -19,7 +19,8 @@ const originLinks = [
     'https://new-front-u2qi-93wo39vf6-nikitas-projects-27f00a22.vercel.app',
     'https://new-front-u2qi-daephmfyy-nikitas-projects-27f00a22.vercel.app',
     'https://new-front-u2qi-r1np2ja0n-nikitas-projects-27f00a22.vercel.app',
-    'https://new-front-u2qi-8e1zfstgy-nikitas-projects-27f00a22.vercel.app'
+    'https://new-front-u2qi-8e1zfstgy-nikitas-projects-27f00a22.vercel.app',
+    'https://new-front-u2qi-k62024m5r-nikitas-projects-27f00a22.vercel.app'
 ];
 
 app.use(express.json());

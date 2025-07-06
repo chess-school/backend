@@ -16,7 +16,8 @@ const originLinks = [
     'http://localhost:3001', 
     'http://localhost:5173', 
     'https://new-front-u2qi-git-dev-nikitas-projects-27f00a22.vercel.app', 
-    'https://new-front-u2qi-93wo39vf6-nikitas-projects-27f00a22.vercel.app'
+    'https://new-front-u2qi-93wo39vf6-nikitas-projects-27f00a22.vercel.app',
+    'https://new-front-u2qi-daephmfyy-nikitas-projects-27f00a22.vercel.app'
 ];
 
 app.use(express.json());

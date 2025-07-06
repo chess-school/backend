@@ -3,6 +3,7 @@ const Notification = require('../models/Notification');
 const Request = require('../models/Request');
 const errorHandler = require('../middleware/errorHandler');
 const { findUserByEmail, findUserById, checkUserRole } = require('../utils/userUtils');
+const mongoose = require('mongoose');
 
 // 🔁 1. Обновление coach-профиля
 const updateCoachProfile = errorHandler(async (req, res) => {
@@ -100,10 +101,10 @@ const getStudents = errorHandler(async (req, res) => {
   checkUserRole(coach, 'coach');
 
   if (!coach || !Array.isArray(coach.students)) {
-    return res.json([]); 
+    return res.json([]);
   }
 
-  const studentIds = coach.students.map(id => id.toString());
+  const studentIds = coach.students.map(s => s._id ? s._id.toString() : s.toString());
 
   res.json(studentIds);
 });
@@ -111,22 +112,40 @@ const getStudents = errorHandler(async (req, res) => {
 // 🔁 6. Удалить студента у тренера
 const removeStudent = errorHandler(async (req, res) => {
   const { coachEmail, studentId } = req.query;
+  
+  if (!coachEmail || !studentId) {
+    return res.status(400).json({ msg: 'Coach email and student ID are required' });
+  }
+
+  // 👇 2. Проверяем, является ли studentId валидным ObjectId
+  if (!mongoose.Types.ObjectId.isValid(studentId)) {
+    return res.status(400).json({ msg: 'Invalid student ID format' });
+  }
+
   const coach = await findUserByEmail(coachEmail);
   checkUserRole(coach, 'coach');
 
-  const student = await findUserById(studentId);
-  if (student.trainer?.toString() !== coach._id.toString()) {
-    return res.status(400).json({ msg: 'Student not assigned to this coach' });
-  }
+  // 👇 3. Преобразуем строку ID в ObjectId перед использованием в $pull
+  const studentObjectId = new mongoose.Types.ObjectId(studentId);
 
-  student.trainer = null;
-  student.trainerEmail = null;
-  await student.save();
+  // 4. УДАЛЯЕМ ObjectId СТУДЕНТА ИЗ МАССИВА ТРЕНЕРА
+   await User.updateOne(
+    { _id: coach._id },
+    { $pull: { students: { _id: studentObjectId } } }
+  );
 
-  coach.students = coach.students.filter(s => s.toString() !== studentId);
-  await coach.save();
-
-  res.json({ msg: 'Student removed successfully' });
+  // 5. ОЧИЩАЕМ ССЫЛКУ НА ТРЕНЕРА У СТУДЕНТА
+  await User.updateOne(
+    { _id: studentObjectId }, // Используем ObjectId и здесь для консистентности
+    { 
+      $unset: { 
+        trainer: "", 
+        trainerEmail: "" 
+      } 
+    }
+  );
+  
+  res.status(200).json({ msg: 'Student has been successfully unassigned from the coach.' });
 });
 
 // 🔁 7. Получить тренера по ID

@@ -51,7 +51,7 @@ const registration = errorHandler(async (req, res) => {
 
   const saltRounds = 10;
   const verificationToken = await bcrypt.hash(Date.now().toString(), saltRounds);
-  const userRole = await Role.findOne({ value: "coach" });
+  const userRole = await Role.findOne({ value: "user" });
 
   // 📷 Default avatar
   const defaultAvatarPath = path.join(__dirname, '..', 'public', 'images', 'default-avatar.png');

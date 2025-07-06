@@ -16,7 +16,7 @@ const originLinks = [
     'http://localhost:3001', 
     'http://localhost:5173', 
     'https://new-front-u2qi-git-dev-nikitas-projects-27f00a22.vercel.app', 
-    'https://new-front-u2qi-fpm3ba4fi-nikitas-projects-27f00a22.vercel.app',
+    'https://new-front-u2qi-jrrs8utd0-nikitas-projects-27f00a22.vercel.app',
     'https://new-front-u2qi-daephmfyy-nikitas-projects-27f00a22.vercel.app',
     'https://new-front-u2qi-r1np2ja0n-nikitas-projects-27f00a22.vercel.app',
     'https://new-front-u2qi-8e1zfstgy-nikitas-projects-27f00a22.vercel.app',

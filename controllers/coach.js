@@ -99,7 +99,13 @@ const getStudents = errorHandler(async (req, res) => {
   const coach = await findUserByEmail(coachEmail);
   checkUserRole(coach, 'coach');
 
-  res.json(coach.students);
+  if (!coach || !Array.isArray(coach.students)) {
+    return res.json([]); 
+  }
+
+  const studentIds = coach.students.map(id => id.toString());
+
+  res.json(studentIds);
 });
 
 // 🔁 6. Удалить студента у тренера
@@ -133,12 +139,22 @@ const getCoachById = errorHandler(async (req, res) => {
 // 🔁 8. Получить студента по ID
 const getStudentById = errorHandler(async (req, res) => {
   const { coachEmail, studentId } = req.query;
+  
+  if (!coachEmail || !studentId) {
+    return res.status(400).json({ msg: 'Coach email and student ID are required' });
+  }
+
   const coach = await findUserByEmail(coachEmail);
   checkUserRole(coach, 'coach');
 
   const student = await findUserById(studentId);
-  if (student.trainer.toString() !== coach._id.toString()) {
-    return res.status(404).json({ msg: 'Student not assigned to this coach' });
+  
+  if (!student) {
+    return res.status(404).json({ msg: 'Student not found' });
+  }
+
+  if (!student.trainer || student.trainer.toString() !== coach._id.toString()) {
+    return res.status(403).json({ msg: 'Access denied: student is not assigned to this coach' });
   }
 
   res.json(student);

@@ -8,7 +8,14 @@ const NotificationSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ['request', 'statusUpdate', 'system', 'reminder'],
+        enum: [ 
+            'request',
+            'statusUpdate',
+            'homework_submission',
+            'homework_reviewed', 
+            'system',           
+            'reminder'           
+        ],
         required: true,
     },
     content: {

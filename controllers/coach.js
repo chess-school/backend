@@ -117,7 +117,6 @@ const removeStudent = errorHandler(async (req, res) => {
     return res.status(400).json({ msg: 'Coach email and student ID are required' });
   }
 
-  // 👇 2. Проверяем, является ли studentId валидным ObjectId
   if (!mongoose.Types.ObjectId.isValid(studentId)) {
     return res.status(400).json({ msg: 'Invalid student ID format' });
   }
@@ -125,18 +124,15 @@ const removeStudent = errorHandler(async (req, res) => {
   const coach = await findUserByEmail(coachEmail);
   checkUserRole(coach, 'coach');
 
-  // 👇 3. Преобразуем строку ID в ObjectId перед использованием в $pull
   const studentObjectId = new mongoose.Types.ObjectId(studentId);
 
-  // 4. УДАЛЯЕМ ObjectId СТУДЕНТА ИЗ МАССИВА ТРЕНЕРА
-   await User.updateOne(
+  await User.updateOne(
     { _id: coach._id },
     { $pull: { students: { _id: studentObjectId } } }
   );
 
-  // 5. ОЧИЩАЕМ ССЫЛКУ НА ТРЕНЕРА У СТУДЕНТА
   await User.updateOne(
-    { _id: studentObjectId }, // Используем ObjectId и здесь для консистентности
+    { _id: studentObjectId },
     { 
       $unset: { 
         trainer: "", 

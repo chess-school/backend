@@ -14,6 +14,7 @@ const authMiddleware = require('./middleware/auth');
 const roleMiddleware = require('./middleware/role');
 const validateRequest = require('./middleware/validateRequest');
 const upload = require('./middleware/upload');
+const HomeworkController  = require('./controllers/homework');
 
 //Auth
 router.post(
@@ -239,5 +240,18 @@ router.delete('/collections/:collectionId', authMiddleware, roleMiddleware(['coa
 router.put('/collections/:collectionId', authMiddleware, roleMiddleware(['coach', 'admin']), puzzleController.updateCollection); // Обновить подборку
 
 router.get('/collections/:collectionId/puzzles', authMiddleware, roleMiddleware(['coach', 'admin']), puzzleController.getCollectionPuzzles); // Получить пазлы из подборки
+
+router.post(
+  '/homework/send', 
+  authMiddleware,
+  upload.single('screenshot'),
+  HomeworkController.sendHomework
+);
+
+router.get('/homework/coach', authMiddleware, HomeworkController.getHomeworkForReview);
+
+router.put('/homework/:homeworkId/review', authMiddleware, HomeworkController.reviewHomework);
+
+router.get('/homework/:id/screenshot', authMiddleware, HomeworkController.getHomeworkScreenshot);
 
 module.exports = router;

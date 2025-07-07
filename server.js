@@ -23,6 +23,14 @@ const originLinks = [
     'https://new-front-u2qi-k62024m5r-nikitas-projects-27f00a22.vercel.app'
 ];
 
+const publicRouter = express.Router();
+publicRouter.get('/ping', (req, res) => {
+    console.log(`Received keep-alive ping at: ${new Date().toISOString()}`);
+    res.status(200).send('Pong!');
+});
+
+app.use('/api', publicRouter);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors({

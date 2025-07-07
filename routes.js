@@ -254,10 +254,4 @@ router.put('/homework/:homeworkId/review', authMiddleware, HomeworkController.re
 
 router.get('/homework/:id/screenshot', authMiddleware, HomeworkController.getHomeworkScreenshot);
 
-
-router.get('/ping', (req, res) => {
-    console.log(`[Ping] Received keep-alive ping at ${new Date().toISOString()}`);
-    res.status(200).send('Pong!');
-});
-
 module.exports = router;

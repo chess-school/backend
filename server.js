@@ -11,6 +11,33 @@ connectDB();
 const app = express();
 const server = http.createServer(app);
 
+const whitelist = [
+    'http://localhost:3002', 
+    'http://localhost:3001', 
+    'http://localhost:5173',
+].filter(Boolean); 
+
+const vercelPreviewRegex = new RegExp(
+    /^https:\/\/new-front-u2qi-[a-z0-9]+-nikitas-projects-27f00a22\.vercel\.app$/
+);
+
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Разрешаем запросы, если они:
+        // - из "белого списка" (whitelist)
+        // - соответствуют шаблону Vercel (vercelPreviewRegex)
+        // - не имеют 'origin' (например, запросы от Postman или curl)
+        if (whitelist.indexOf(origin) !== -1 || vercelPreviewRegex.test(origin) || !origin) {
+            callback(null, true);
+        } else {
+            callback(new Error('This origin is not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+};
+
 const publicRouter = express.Router();
 publicRouter.get('/ping', (req, res) => {
     console.log(`Received keep-alive ping at: ${new Date().toISOString()}`);
@@ -19,28 +46,10 @@ publicRouter.get('/ping', (req, res) => {
 
 app.use('/api', publicRouter);
 
-const dynamicCors = (origin, callback) => {
-    const whitelist = [
-        'http://localhost:3002',
-        'http://localhost:3001',
-        'http://localhost:5173'
-    ];
-    const regex = /^https:\/\/new-front-u2qi-[a-z0-9]+\.vercel\.app$/;
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-    if (!origin || whitelist.includes(origin) || regex.test(origin)) {
-        callback(null, true);
-    } else {
-        callback(new Error('Not allowed by CORS: ' + origin));
-    }
-};
-
-app.use(cors({
-    origin: dynamicCors,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
+app.use(cors(corsOptions));
 
 app.use('/api', require('./routes'));
 

@@ -11,13 +11,6 @@ connectDB();
 const app = express();
 const server = http.createServer(app);
 
-const originLinks = [
-    'http://localhost:3002',
-    'http://localhost:3001',
-    'http://localhost:5173',
-    /^https:\/\/new-front-u2qi-[a-z0-9]+\.vercel\.app$/
-];
-
 const publicRouter = express.Router();
 publicRouter.get('/ping', (req, res) => {
     console.log(`Received keep-alive ping at: ${new Date().toISOString()}`);
@@ -26,14 +19,28 @@ publicRouter.get('/ping', (req, res) => {
 
 app.use('/api', publicRouter);
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+const dynamicCors = (origin, callback) => {
+    const whitelist = [
+        'http://localhost:3002',
+        'http://localhost:3001',
+        'http://localhost:5173'
+    ];
+    const regex = /^https:\/\/new-front-u2qi-[a-z0-9]+\.vercel\.app$/;
+
+    if (!origin || whitelist.includes(origin) || regex.test(origin)) {
+        callback(null, true);
+    } else {
+        callback(new Error('Not allowed by CORS: ' + origin));
+    }
+};
+
 app.use(cors({
-    origin: originLinks,
+    origin: dynamicCors,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
 
 app.use('/api', require('./routes'));
 

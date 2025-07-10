@@ -12,15 +12,10 @@ const app = express();
 const server = http.createServer(app);
 
 const originLinks = [
-    'http://localhost:3002', 
-    'http://localhost:3001', 
-    'http://localhost:5173', 
-    'https://new-front-u2qi-99pw6oah7-nikitas-projects-27f00a22.vercel.app', 
-    'https://new-front-u2qi-208ucx92u-nikitas-projects-27f00a22.vercel.app',
-    'https://new-front-u2qi-d4jmz3wcy-nikitas-projects-27f00a22.vercel.app',
-    'https://new-front-u2qi-r1np2ja0n-nikitas-projects-27f00a22.vercel.app',
-    'https://new-front-u2qi-8e1zfstgy-nikitas-projects-27f00a22.vercel.app',
-    'https://new-front-u2qi-da91kzjnn-nikitas-projects-27f00a22.vercel.app'
+    'http://localhost:3002',
+    'http://localhost:3001',
+    'http://localhost:5173',
+    /^https:\/\/new-front-u2qi-[a-z0-9]+\.vercel\.app$/
 ];
 
 const publicRouter = express.Router();

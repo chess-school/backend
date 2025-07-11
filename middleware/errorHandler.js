@@ -3,7 +3,10 @@ const errorHandler = (handler) => async (req, res, next) => {
         await handler(req, res, next);
     } catch (error) {
         console.error('Ошибка:', error);
-        res.status(500).json({ msg: 'Server error', error: error.message });
+        const message = process.env.NODE_ENV === 'production'
+            ? 'Internal Server Error'
+            : error.message;
+        res.status(500).json({ msg: 'Server error', error: message });
     }
 };
 

@@ -9,33 +9,34 @@ const Player = require('../models/Player');
 const Role = require('../models/Role');
 const { auth } = require('../config/firebase');
 const errorHandler = require('../middleware/errorHandler');
+const { sendVerificationEmail } = require('../utils/nodemailer');
 
 // 🔐 Generate JWT Token
 const generateAccessToken = (id, roles) => {
   return jwt.sign({ id, roles }, process.env.JWT_SECRET, { expiresIn: "24h" });
 };
 
-// 📧 Mail transporter setup (Mailtrap)
-const transporter = nodemailer.createTransport({
-  host: process.env.MAILTRAP_HOST,
-  port: process.env.MAILTRAP_PORT,
-  auth: {
-    user: process.env.MAILTRAP_USER,
-    pass: process.env.MAILTRAP_PASS,
-  },
-});
+// // 📧 Mail transporter setup (Mailtrap)
+// const transporter = nodemailer.createTransport({
+//   host: process.env.MAILTRAP_HOST,
+//   port: process.env.MAILTRAP_PORT,
+//   auth: {
+//     user: process.env.MAILTRAP_USER,
+//     pass: process.env.MAILTRAP_PASS,
+//   },
+// });
 
 // 📩 Send verification email
-const sendVerificationEmail = async (email, token) => {
-  const verificationUrl = `${process.env.BASE_URL}/auth/verify-email?token=${encodeURIComponent(token)}`;
-  const mailOptions = {
-    from: '"Chess School" <no-reply@chess-school.com>',
-    to: email,
-    subject: 'Verify your email',
-    html: `<p>Welcome to Chess School!</p><p>Please confirm your email:</p><a href="${verificationUrl}">${verificationUrl}</a>`,
-  };
-  await transporter.sendMail(mailOptions);
-};
+// const sendVerificationEmail = async (email, token) => {
+//   const verificationUrl = `${process.env.BASE_URL}/auth/verify-email?token=${encodeURIComponent(token)}`;
+//   const mailOptions = {
+//     from: '"Chess School" <no-reply@chess-school.com>',
+//     to: email,
+//     subject: 'Verify your email',
+//     html: `<p>Welcome to Chess School!</p><p>Please confirm your email:</p><a href="${verificationUrl}">${verificationUrl}</a>`,
+//   };
+//   await transporter.sendMail(mailOptions);
+// };
 
 // 📝 Registration
 const registration = errorHandler(async (req, res) => {
@@ -46,14 +47,12 @@ const registration = errorHandler(async (req, res) => {
 
   const existingUser = await User.findOne({ email: req.body.email });
   if (existingUser) {
-    return res.status(400).json({ msg: 'User already exists' });
+    return res.status(400).json({ msg: 'User with this email already exists' });
   }
 
   const saltRounds = 10;
   const verificationToken = await bcrypt.hash(Date.now().toString(), saltRounds);
   const userRole = await Role.findOne({ value: "user" });
-
-  // 📷 Default avatar
   const defaultAvatarPath = path.join(__dirname, '..', 'public', 'images', 'default-avatar.png');
   const defaultAvatarBuffer = fs.readFileSync(defaultAvatarPath);
 
@@ -73,7 +72,6 @@ const registration = errorHandler(async (req, res) => {
 
   await user.save();
 
-  // ♟ Create player profile
   const player = new Player({
     user: user._id,
     bullet: {},
@@ -83,13 +81,15 @@ const registration = errorHandler(async (req, res) => {
   });
   await player.save();
 
+  // 👇 --- ИЗМЕНЕНИЕ 4: ВЫЗЫВАЕМ НОВУЮ ФУНКЦИЮ ---
   await sendVerificationEmail(req.body.email, verificationToken);
 
   res.status(201).json({
-    msg: 'Registration successful',
+    msg: 'Registration successful. Please check your email to verify your account.',
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,
+    // Не рекомендуется отправлять токен обратно в чистом виде, но если он нужен для фронтенда:
     token: encodeURIComponent(verificationToken),
   });
 });
@@ -125,19 +125,22 @@ const verifyEmail = errorHandler(async (req, res) => {
 
 // 🔁 Resend verification email
 const resendVerificationEmail = errorHandler(async (req, res) => {
-  const user = await User.findOne({ verificationToken: req.body.token });
-  if (!user) return res.status(404).json({ msg: 'User not found or token expired' });
+  const user = await User.findOne({ email: req.body.email }); // Искать лучше по email
+  if (!user) return res.status(404).json({ msg: 'User not found' });
 
   if (user.emailVerified) {
     return res.status(200).json({ msg: 'Email is already verified.' });
   }
 
+  // Создаем новый токен
   const salt = await bcrypt.genSalt(10);
   const newToken = await bcrypt.hash(Date.now().toString(), salt);
   user.verificationToken = newToken;
-  user.lastEmailSent = new Date();
-
+  // Можно добавить поле для отслеживания последней отправки, если нужно
+  // user.lastEmailSent = new Date();
   await user.save();
+
+  // 👇 --- ИЗМЕНЕНИЕ 3: ВЫЗЫВАЕМ НОВУЮ ФУНКЦИЮ ---
   await sendVerificationEmail(user.email, newToken);
 
   res.json({ msg: 'Verification email resent successfully' });

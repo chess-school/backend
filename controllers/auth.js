@@ -1,14 +1,12 @@
 const fs = require('fs');
 const path = require('path');
-const bcrypt = require('bcrypt');
-const jwt = ('jsonwebtoken');
-const crypto = 'crypto'; // 1. Используем встроенный крипто-модуль для безопасных токенов
+const jwt = require('jsonwebtoken'); // <-- Используем require
+const crypto = require('crypto'); // <-- Используем require
 const { validationResult } = require('express-validator');
-const User = ('../models/User');
-const Player = ('../models/Player');
-const Role = ('../models/Role');
-const errorHandler = ('../middleware/errorHandler');
-const { sendVerificationEmail } = ('../utils/nodemailer');
+const User = require('../models/User'); // <-- Используем require
+const Player = require('../models/Player'); // <-- Используем require
+const Role = require('../models/Role'); // <-- Используем require
+const { sendVerificationEmail } = require('../utils/nodemailer'); // <-- Используем require
 
 // --- 2. Улучшение производительности: Загружаем дефолтный аватар один раз при старте ---
 const defaultAvatarPath = path.join(__dirname, '..', 'public', 'images', 'default-avatar.png');

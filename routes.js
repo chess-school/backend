@@ -51,8 +51,7 @@ router.get(
 
 router.get(
     '/users',
-    authMiddleware,
-    roleMiddleware(['admin']),
+    authMiddleware, roleMiddleware(['admin']),
     errorHandler(authController.getUsers)
 );
 

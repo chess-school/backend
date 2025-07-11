@@ -3,6 +3,7 @@ const http = require('http');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const connectDB = require('./config/db');
+const i18nextMiddleware = require('./config/i18n');
 const initializeSocket = require('./sockets/game.sockets');
 
 dotenv.config();
@@ -48,7 +49,7 @@ app.use('/api', publicRouter);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
+app.use(i18nextMiddleware); 
 app.use(cors(corsOptions));
 
 app.use('/api', require('./routes'));

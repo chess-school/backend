@@ -1,0 +1,13 @@
+{
+  "api": {
+    "userExistsError": "Użytkownik o tym adresie e-mail już istnieje",
+    "registrationSuccess": "Rejestracja pomyślna. Sprawdź e-mail, aby zweryfikować swoje konto."
+  },
+  "email": {
+    "verificationSubject": "Potwierdź swój e-mail w Chess School",
+    "welcome": "Witaj w Szkole Szachowej!",
+    "instruction": "Jeszcze tylko jeden krok. Potwierdź swój adres e-mail, klikając poniższy przycisk:",
+    "buttonText": "Potwierdź E-mail",
+    "linkInstruction": "Jeśli przycisk не działa, skopiuj i wklej ten link do przeglądarki:"
+  }
+}

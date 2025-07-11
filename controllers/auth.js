@@ -47,7 +47,7 @@ const registration = errorHandler(async (req, res) => {
 
   const existingUser = await User.findOne({ email: req.body.email });
   if (existingUser) {
-    return res.status(400).json({ msg: 'User with this email already exists' });
+    return res.status(400).json({ msg: req.t('api.userExistsError') });
   }
 
   const saltRounds = 10;
@@ -82,10 +82,10 @@ const registration = errorHandler(async (req, res) => {
   await player.save();
 
   // 👇 --- ИЗМЕНЕНИЕ 4: ВЫЗЫВАЕМ НОВУЮ ФУНКЦИЮ ---
-  await sendVerificationEmail(req.body.email, verificationToken);
+  await sendVerificationEmail(req.body.email, verificationToken, req.t);
 
   res.status(201).json({
-    msg: 'Registration successful. Please check your email to verify your account.',
+    msg: req.t('api.registrationSuccess'),
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,

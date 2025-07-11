@@ -1,0 +1,13 @@
+{
+  "api": {
+    "userExistsError": "User with this email already exists",
+    "registrationSuccess": "Registration successful. Please check your email to verify your account."
+  },
+  "email": {
+    "verificationSubject": "Confirm your email at Chess School",
+    "welcome": "Welcome to Chess School!",
+    "instruction": "Just one more step. Please confirm your email by clicking the button below:",
+    "buttonText": "Confirm Email",
+    "linkInstruction": "If the button doesn't work, copy and paste this link into your browser:"
+  }
+}

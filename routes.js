@@ -7,6 +7,7 @@ const scheduleController = require('./controllers/schedule');
 const gameController = require('./controllers/game');
 const playerController = require('./controllers/player');
 const puzzleController = require('./controllers/puzzles');
+const errorHandler = ('../middleware/errorHandler');
 const express = require('express');
 const { check } = require('express-validator');
 const router = express.Router();
@@ -21,56 +22,56 @@ router.post(
     '/auth/register',
     validateRequest(['firstName', 'lastName', 'email', 'password']),
     check('password', "Password must be between 8 and 20 characters").isLength({ min: 8, max: 20 }),
-    authController.registration
+    errorHandler(authController.registration)
 );
 
 router.post(
     '/auth/login',
     validateRequest(['email', 'password']),
-    authController.login
+    errorHandler(authController.login)
 );
 
 router.get(
     '/auth/verify-email',
     validateRequest(['token']),
-    authController.verifyEmail
+    errorHandler(authController.verifyEmail)
 );
 
 router.post(
     '/auth/resend-verification',
     validateRequest(['token']),
-    authController.resendVerificationEmail
+    errorHandler(authController.resendVerificationEmail)
 );
 
 router.get(
     '/auth/check-verification',
     validateRequest(['email']), 
-    authController.checkVerificationStatus
+    errorHandler(authController.checkVerificationStatus)
 );
 
 router.get(
     '/users',
     authMiddleware,
     roleMiddleware(['admin']),
-    authController.getUsers
+    errorHandler(authController.getUsers)
 );
 
 router.get(
     '/auth/avatar/:id',
-    authController.getAvatar
+    errorHandler(authController.getAvatar)
   );  
 
 router.get(
     '/auth/profile',
     authMiddleware,
-    authController.getProfile
+    errorHandler(authController.getProfile)
 );
 
 router.put(
     '/auth/profile',
     authMiddleware,
     upload.single('avatar'),
-    authController.updateProfile
+    errorHandler(authController.updateProfile)
   );  
 
 // Тренеры

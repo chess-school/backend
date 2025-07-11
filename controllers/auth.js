@@ -26,7 +26,7 @@ const generateAccessToken = (id, roles) => {
 };
 
 // 📝 Registration
-const registration = errorHandler(async (req, res) => {
+const registration = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
@@ -68,10 +68,10 @@ const registration = errorHandler(async (req, res) => {
     msg: req.t('api.registrationSuccess'),
     email: user.email,
   });
-});
+};
 
 // 🔐 Login
-const login = errorHandler(async (req, res) => {
+const login = async (req, res) => {
   const email = req.body.email.trim().toLowerCase();
   const password = req.body.password;
   const user = await User.findOne({ email });
@@ -100,10 +100,10 @@ const login = errorHandler(async (req, res) => {
       roles: user.roles,
     },
   });
-});
+};
 
 // ✅ Verify email
-const verifyEmail = errorHandler(async (req, res) => {
+const verifyEmail = async (req, res) => {
   // --- 8. Учитываем срок действия токена ---
   const user = await User.findOne({
     verificationToken: req.query.token,
@@ -120,10 +120,10 @@ const verifyEmail = errorHandler(async (req, res) => {
   await user.save();
 
   res.json({ msg: req.t('api.emailVerifiedSuccess') });
-});
+};
 
 // 🔁 Resend verification email
-const resendVerificationEmail = errorHandler(async (req, res) => {
+const resendVerificationEmail = async (req, res) => {
   const { email } = req.body;
   const user = await User.findOne({ email: email.toLowerCase() });
 
@@ -149,10 +149,10 @@ const resendVerificationEmail = errorHandler(async (req, res) => {
   await sendVerificationEmail(user.email, user.verificationToken, req.t);
 
   res.json({ msg: req.t('api.resendSuccess') });
-});
+};
 
 // ✅ Check email verification status
-const checkVerificationStatus = errorHandler(async (req, res) => {
+const checkVerificationStatus = async (req, res) => {
   const { email } = req.query; // Ищем по email, а не по токену
   if (!email) {
     return res.status(400).json({ msg: "Email query parameter is required" });
@@ -164,19 +164,19 @@ const checkVerificationStatus = errorHandler(async (req, res) => {
   }
 
   res.json({ emailVerified: user.emailVerified });
-});
+};
 
 
 // 👥 Get all users (admin only)
-const getUsers = errorHandler(async (req, res) => {
+const getUsers = async (req, res) => {
   // --- 11. Исключаем приватные поля ---
   const users = await User.find().select('-password -verificationToken -verificationTokenExpires');
   res.json(users);
-});
+};
 
 
 // 👤 Get current user profile
-const getProfile = errorHandler(async (req, res) => {
+const getProfile = async (req, res) => {
   // `select('-password')` уже исключает пароль. Это хорошо.
   const user = await User.findById(req.user.id).select('-password -verificationToken -verificationTokenExpires');
   if (!user) {
@@ -184,10 +184,10 @@ const getProfile = errorHandler(async (req, res) => {
   }
 
   res.json(user); // Возвращаем объект User без лишних манипуляций, Mongoose позаботится о JSON
-});
+};
 
 // 🖼 Get avatar image by user ID
-const getAvatar = errorHandler(async (req, res) => {
+const getAvatar = async (req, res) => {
   // Этот эндпоинт публичный, любой может посмотреть аватар. Это нормально, если так и задумано.
   const user = await User.findById(req.params.id).select('avatar');
   if (!user || !user.avatar?.data) {
@@ -196,10 +196,10 @@ const getAvatar = errorHandler(async (req, res) => {
 
   res.set('Content-Type', user.avatar.contentType);
   res.send(user.avatar.data);
-});
+};
 
 // ✏️ Update profile
-const updateProfile = errorHandler(async (req, res) => {
+const updateProfile = async (req, res) => {
   const user = await User.findById(req.user.id);
   if (!user) return res.status(404).json({ msg: req.t('userNotFound') });
 
@@ -255,7 +255,7 @@ const updateProfile = errorHandler(async (req, res) => {
     msg: req.t('api.profileUpdatedSuccess'),
     user: updatedUser,
   });
-});
+};
 
 module.exports = {
   registration, 

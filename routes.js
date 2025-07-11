@@ -42,9 +42,9 @@ router.post(
     authController.resendVerificationEmail
 );
 
-router.post(
+router.get(
     '/auth/check-verification',
-    validateRequest(['token']),
+    validateRequest(['email']), 
     authController.checkVerificationStatus
 );
 

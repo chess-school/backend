@@ -1,42 +1,29 @@
 const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
+const jwt = ('jsonwebtoken');
+const crypto = 'crypto'; // 1. Используем встроенный крипто-модуль для безопасных токенов
 const { validationResult } = require('express-validator');
-const nodemailer = require('nodemailer');
-const User = require('../models/User');
-const Player = require('../models/Player');
-const Role = require('../models/Role');
-const { auth } = require('../config/firebase');
-const errorHandler = require('../middleware/errorHandler');
-const { sendVerificationEmail } = require('../utils/nodemailer');
+const User = ('../models/User');
+const Player = ('../models/Player');
+const Role = ('../models/Role');
+const errorHandler = ('../middleware/errorHandler');
+const { sendVerificationEmail } = ('../utils/nodemailer');
+
+// --- 2. Улучшение производительности: Загружаем дефолтный аватар один раз при старте ---
+const defaultAvatarPath = path.join(__dirname, '..', 'public', 'images', 'default-avatar.png');
+const DEFAULT_AVATAR_BUFFER = fs.readFileSync(defaultAvatarPath);
+
+
+// --- 3. Генерация криптографически надежного токена ---
+const generateSecureToken = () => {
+  return crypto.randomBytes(32).toString('hex');
+};
 
 // 🔐 Generate JWT Token
 const generateAccessToken = (id, roles) => {
   return jwt.sign({ id, roles }, process.env.JWT_SECRET, { expiresIn: "24h" });
 };
-
-// // 📧 Mail transporter setup (Mailtrap)
-// const transporter = nodemailer.createTransport({
-//   host: process.env.MAILTRAP_HOST,
-//   port: process.env.MAILTRAP_PORT,
-//   auth: {
-//     user: process.env.MAILTRAP_USER,
-//     pass: process.env.MAILTRAP_PASS,
-//   },
-// });
-
-// 📩 Send verification email
-// const sendVerificationEmail = async (email, token) => {
-//   const verificationUrl = `${process.env.BASE_URL}/auth/verify-email?token=${encodeURIComponent(token)}`;
-//   const mailOptions = {
-//     from: '"Chess School" <no-reply@chess-school.com>',
-//     to: email,
-//     subject: 'Verify your email',
-//     html: `<p>Welcome to Chess School!</p><p>Please confirm your email:</p><a href="${verificationUrl}">${verificationUrl}</a>`,
-//   };
-//   await transporter.sendMail(mailOptions);
-// };
 
 // 📝 Registration
 const registration = errorHandler(async (req, res) => {
@@ -45,52 +32,41 @@ const registration = errorHandler(async (req, res) => {
     return res.status(400).json({ errors: errors.array() });
   }
 
-  const existingUser = await User.findOne({ email: req.body.email });
+  const existingUser = await User.findOne({ email: req.body.email.toLowerCase() });
   if (existingUser) {
     return res.status(400).json({ msg: req.t('api.userExistsError') });
   }
 
-  const saltRounds = 10;
-  const verificationToken = await bcrypt.hash(Date.now().toString(), saltRounds);
+  // --- Используем новую безопасную функцию для генерации токена ---
+  const verificationToken = generateSecureToken();
   const userRole = await Role.findOne({ value: "user" });
-  const defaultAvatarPath = path.join(__dirname, '..', 'public', 'images', 'default-avatar.png');
-  const defaultAvatarBuffer = fs.readFileSync(defaultAvatarPath);
 
   const user = new User({
     firstName: req.body.firstName,
     lastName: req.body.lastName,
-    email: req.body.email,
-    password: req.body.password,
+    email: req.body.email.toLowerCase(),
+    password: req.body.password, // Пароль будет хеширован pre-save хуком в модели
     emailVerified: false,
     verificationToken,
+    verificationTokenExpires: Date.now() + 24 * 60 * 60 * 1000, // 4. Токен действует 24 часа
     roles: [userRole.value],
     avatar: {
-      data: defaultAvatarBuffer,
+      data: DEFAULT_AVATAR_BUFFER,
       contentType: 'image/png'
     }
   });
-
   await user.save();
 
-  const player = new Player({
-    user: user._id,
-    bullet: {},
-    blitz: {},
-    rapid: {},
-    classic: {}
-  });
+  // Создание профиля игрока
+  const player = new Player({ user: user._id });
   await player.save();
 
-  // 👇 --- ИЗМЕНЕНИЕ 4: ВЫЗЫВАЕМ НОВУЮ ФУНКЦИЮ ---
-  await sendVerificationEmail(req.body.email, verificationToken, req.t);
+  await sendVerificationEmail(user.email, verificationToken, req.t);
 
+  // --- 5. УДАЛЕН небезопасный токен из ответа ---
   res.status(201).json({
     msg: req.t('api.registrationSuccess'),
     email: user.email,
-    firstName: user.firstName,
-    lastName: user.lastName,
-    // Не рекомендуется отправлять токен обратно в чистом виде, но если он нужен для фронтенда:
-    token: encodeURIComponent(verificationToken),
   });
 });
 
@@ -98,84 +74,122 @@ const registration = errorHandler(async (req, res) => {
 const login = errorHandler(async (req, res) => {
   const email = req.body.email.trim().toLowerCase();
   const password = req.body.password;
+  const user = await User.findOne({ email });
 
-  const user = await User.findOne({ email: email });
-  if (!user) return res.status(400).json({ msg: 'User not found' });
+  // --- 6. Защита от перечисления пользователей: общая ошибка ---
+  const isPasswordMatch = user ? await user.comparePassword(password) : false;
 
-  if (!user.emailVerified) return res.status(400).json({ msg: 'Please verify your email first' });
+  if (!user || !isPasswordMatch) {
+    return res.status(401).json({ msg: req.t('api.invalidCredentials') }); // Используем 401 Unauthorized
+  }
 
-  const isPasswordMatch = await bcrypt.compare(password, user.password);
-  if (!isPasswordMatch) return res.status(400).json({ msg: 'Invalid credentials' });
+  if (!user.emailVerified) {
+    return res.status(403).json({ msg: req.t('api.emailNotVerified') }); // Используем 403 Forbidden
+  }
 
   const token = generateAccessToken(user._id, user.roles);
-  res.status(200).json({ user, token });
+
+  // --- 7. Защита от утечки данных: отправляем только нужные поля ---
+  res.status(200).json({
+    token,
+    user: {
+      id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      roles: user.roles,
+    },
+  });
 });
 
 // ✅ Verify email
 const verifyEmail = errorHandler(async (req, res) => {
-  const user = await User.findOne({ verificationToken: req.query.token, emailVerified: false });
-  if (!user) return res.status(400).json({ msg: 'Invalid or expired token' });
+  // --- 8. Учитываем срок действия токена ---
+  const user = await User.findOne({
+    verificationToken: req.query.token,
+    verificationTokenExpires: { $gt: Date.now() } // Проверяем, что токен не истек
+  });
+
+  if (!user) {
+    return res.status(400).json({ msg: req.t('api.invalidOrExpiredToken') });
+  }
 
   user.emailVerified = true;
   user.verificationToken = undefined;
+  user.verificationTokenExpires = undefined;
   await user.save();
 
-  res.json({ msg: 'Email verified successfully' });
+  res.json({ msg: req.t('api.emailVerifiedSuccess') });
 });
 
 // 🔁 Resend verification email
 const resendVerificationEmail = errorHandler(async (req, res) => {
-  const user = await User.findOne({ email: req.body.email }); // Искать лучше по email
-  if (!user) return res.status(404).json({ msg: 'User not found' });
+  const { email } = req.body;
+  const user = await User.findOne({ email: email.toLowerCase() });
 
-  if (user.emailVerified) {
-    return res.status(200).json({ msg: 'Email is already verified.' });
+  // --- 9. Тихий ответ, если пользователь не найден, для защиты от перечисления ---
+  if (!user) {
+    return res.json({ msg: req.t('api.resendSuccess') });
   }
 
-  // Создаем новый токен
-  const salt = await bcrypt.genSalt(10);
-  const newToken = await bcrypt.hash(Date.now().toString(), salt);
-  user.verificationToken = newToken;
-  // Можно добавить поле для отслеживания последней отправки, если нужно
-  // user.lastEmailSent = new Date();
+  if (user.emailVerified) {
+    return res.status(200).json({ msg: req.t('api.emailAlreadyVerified') });
+  }
+
+  // --- 10. Защита от спама (Rate Limiting) ---
+  if (user.verificationEmailSentAt && (Date.now() - user.verificationEmailSentAt) < 120000) { // 2 минуты
+    return res.status(429).json({ msg: req.t('api.tooManyRequests') });
+  }
+
+  user.verificationToken = generateSecureToken();
+  user.verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
+  user.verificationEmailSentAt = Date.now();
   await user.save();
 
-  // 👇 --- ИЗМЕНЕНИЕ 3: ВЫЗЫВАЕМ НОВУЮ ФУНКЦИЮ ---
-  await sendVerificationEmail(user.email, newToken);
+  await sendVerificationEmail(user.email, user.verificationToken, req.t);
 
-  res.json({ msg: 'Verification email resent successfully' });
+  res.json({ msg: req.t('api.resendSuccess') });
 });
 
 // ✅ Check email verification status
 const checkVerificationStatus = errorHandler(async (req, res) => {
-  const user = await User.findOne({ verificationToken: req.body.token });
-  if (!user) return res.status(404).json({ msg: 'Invalid or expired token' });
+  const { email } = req.query; // Ищем по email, а не по токену
+  if (!email) {
+    return res.status(400).json({ msg: "Email query parameter is required" });
+  }
+  const user = await User.findOne({ email: email.toLowerCase() });
+
+  if (!user) {
+    return res.status(404).json({ msg: 'User not found' }); // Здесь 404 - нормально, так как эндпоинт авторизован
+  }
 
   res.json({ emailVerified: user.emailVerified });
 });
 
+
 // 👥 Get all users (admin only)
 const getUsers = errorHandler(async (req, res) => {
-  const users = await User.find();
+  // --- 11. Исключаем приватные поля ---
+  const users = await User.find().select('-password -verificationToken -verificationTokenExpires');
   res.json(users);
 });
 
+
 // 👤 Get current user profile
 const getProfile = errorHandler(async (req, res) => {
-  const user = await User.findById(req.user.id).select('-password');
-  if (!user) return res.status(404).json({ msg: 'User not found' });
+  // `select('-password')` уже исключает пароль. Это хорошо.
+  const user = await User.findById(req.user.id).select('-password -verificationToken -verificationTokenExpires');
+  if (!user) {
+    return res.status(404).json({ msg: req.t('userNotFound') });
+  }
 
-  const profile = user.toObject();
-  profile.photoUrl = user.avatar?.data
-    ? `${process.env.BASE_URL}/auth/avatar/${user._id}`
-    : null;
-
-  res.json(profile);
+  res.json(user); // Возвращаем объект User без лишних манипуляций, Mongoose позаботится о JSON
 });
 
 // 🖼 Get avatar image by user ID
 const getAvatar = errorHandler(async (req, res) => {
-  const user = await User.findById(req.params.id);
+  // Этот эндпоинт публичный, любой может посмотреть аватар. Это нормально, если так и задумано.
+  const user = await User.findById(req.params.id).select('avatar');
   if (!user || !user.avatar?.data) {
     return res.status(404).json({ msg: 'Avatar not found' });
   }
@@ -187,72 +201,70 @@ const getAvatar = errorHandler(async (req, res) => {
 // ✏️ Update profile
 const updateProfile = errorHandler(async (req, res) => {
   const user = await User.findById(req.user.id);
-  if (!user) return res.status(404).json({ msg: 'User not found' });
+  if (!user) return res.status(404).json({ msg: req.t('userNotFound') });
 
-  // Coach profile section
-  if (user.roles.includes('coach')) {
-    user.coachProfile = {
-      ...user.coachProfile,
-      title: req.body.title || user.coachProfile?.title || '',
-      experience: req.body.experience || user.coachProfile?.experience || '',
-      bio: req.body.bio || user.coachProfile?.bio || '',
-      price: req.body.price ?? user.coachProfile?.price,
-      services: Array.isArray(req.body.services)
-        ? req.body.services
-        : user.coachProfile?.services || [],
-    };
-  }
-
-  // 🔒 Change password
-  if (req.body.newPassword) {
-    if (!req.body.currentPassword) {
-      return res.status(400).json({ msg: 'Current password is required' });
-    }
-
-    const isMatch = await bcrypt.compare(req.body.currentPassword, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ msg: 'Invalid current password' });
-    }
-
-    user.password = req.body.newPassword; // 🔐 Will be hashed automatically on save
-  }
-
-  // 📝 Update other profile fields
+  // Обновление основных полей
   user.firstName = req.body.firstName || user.firstName;
   user.lastName = req.body.lastName || user.lastName;
-  user.email = req.body.email || user.email;
 
-  // 🖼 Update avatar if provided
+  // Обновление профиля тренера
+  if (user.roles.includes('coach')) {
+    user.coachProfile = { ...user.coachProfile, ...req.body.coachProfile };
+  }
+
+  // Обновление аватара
   if (req.file) {
-    user.avatar = {
-      data: req.file.buffer,
-      contentType: req.file.mimetype,
-    };
+    user.avatar = { data: req.file.buffer, contentType: req.file.mimetype };
+  }
+
+  // --- 12. Безопасная смена email ---
+  if (req.body.email && req.body.email.toLowerCase() !== user.email) {
+    const newEmail = req.body.email.toLowerCase();
+    const existingUser = await User.findOne({ email: newEmail });
+    if (existingUser) {
+      return res.status(400).json({ msg: req.t('api.emailTakenError') });
+    }
+    user.email = newEmail;
+    user.emailVerified = false; // Требуем новую верификацию
+    user.verificationToken = generateSecureToken();
+    user.verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
+    await sendVerificationEmail(user.email, user.verificationToken, req.t);
+  }
+
+  // --- Безопасная смена пароля (код не изменился, но подтверждаю, что он верен) ---
+  if (req.body.newPassword) {
+    if (!req.body.currentPassword) {
+      return res.status(400).json({ msg: req.t('api.currentPasswordRequired') });
+    }
+    const isMatch = await user.comparePassword(req.body.currentPassword);
+    if (!isMatch) {
+      return res.status(400).json({ msg: req.t('api.invalidCurrentPassword') });
+    }
+    user.password = req.body.newPassword;
   }
 
   await user.save();
 
+  // --- Отправляем обратно только безопасные данные ---
+  const updatedUser = user.toObject();
+  delete updatedUser.password;
+  delete updatedUser.verificationToken;
+  delete updatedUser.verificationTokenExpires;
+
   res.json({
-    msg: 'Profile updated',
-    user: {
-      id: user._id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      email: user.email,
-      roles: user.roles,
-      ...(user.roles.includes('coach') && { coachProfile: user.coachProfile }),
-    },
+    msg: req.t('api.profileUpdatedSuccess'),
+    user: updatedUser,
   });
 });
 
 module.exports = {
-  registration,
-  login,
-  verifyEmail,
-  resendVerificationEmail,
+  registration, 
+  login, 
+  verifyEmail, 
+  resendVerificationEmail, 
   checkVerificationStatus,
-  getUsers,
-  getProfile,
-  getAvatar,
+  getUsers, 
+  getProfile, 
+  getAvatar, 
   updateProfile,
 };

@@ -63,7 +63,9 @@ const UserSchema = new mongoose.Schema({
     registrationDate: {
         type: Date,
         default: Date.now
-    }
+    },
+    verificationTokenExpires: { type: Date },
+    verificationEmailSentAt: { type: Date }
 });
 
 UserSchema.pre('save', async function (next) {

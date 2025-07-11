@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const errorHandler = require('../middleware/errorHandler');
 
 let transporter;
 
@@ -36,18 +37,17 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 
-const sendVerificationEmail = async (email, token, t) => {
+const sendVerificationEmail = errorHandler(async (email, token, t) => {
   const isProduction = process.env.NODE_ENV === 'production';
   const verificationUrl = `${process.env.BASE_URL}/auth/verify-email?token=${encodeURIComponent(token)}`;
   const fromAddress = isProduction
     ? `"Chess School" <${process.env.PROD_MAIL_USER}>`
     : '"Chess School (Dev)" <no-reply@chess-school.com>';
 
-  // --- ИЗМЕНЕНИЕ 2: Используем функцию 't' для всех текстов ---
   const mailOptions = {
     from: fromAddress,
     to: email,
-    subject: t('email.verificationSubject'), // Тема из файла перевода
+    subject: t('email.verificationSubject'),
     html: `
       <div style="font-family: sans-serif; padding: 20px; color: #333;">
         <h2>${t('email.welcome')}</h2>
@@ -64,14 +64,9 @@ const sendVerificationEmail = async (email, token, t) => {
     `,
   };
 
-  try {
-    await transporter.sendMail(mailOptions);
-    console.log(`Verification email sent successfully to ${email}`);
-  } catch (error) {
-    console.error(`Error sending email to ${email}:`, error);
-    throw new Error('Could not send verification email.');
-  }
-};
+  await transporter.sendMail(mailOptions);
+  console.log(`Verification email sent successfully to ${email}`);
+});
 
 module.exports = {
   sendVerificationEmail,

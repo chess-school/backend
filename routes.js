@@ -15,6 +15,7 @@ const roleMiddleware = require('./middleware/role');
 const validateRequest = require('./middleware/validateRequest');
 const upload = require('./middleware/upload');
 const HomeworkController  = require('./controllers/homework');
+const errorHandler = require('../middleware/errorHandler');
 
 //Auth
 router.post(
@@ -253,5 +254,25 @@ router.get('/homework/coach', authMiddleware, HomeworkController.getHomeworkForR
 router.put('/homework/:homeworkId/review', authMiddleware, HomeworkController.reviewHomework);
 
 router.get('/homework/:id/screenshot', authMiddleware, HomeworkController.getHomeworkScreenshot);
+
+const MIDDLEWARE_NAMES_TO_SKIP = [
+  'authMiddleware',
+  'roleMiddleware',
+  'validateRequest',
+  'upload',
+  'check' 
+];
+
+router.stack.forEach(layer => {
+  if (layer.route) {
+    layer.route.stack.forEach(handlerLayer => {
+      const handlerName = handlerLayer.handle.name;
+
+      if (!handlerName || !MIDDLEWARE_NAMES_TO_SKIP.includes(handlerName)) {
+        handlerLayer.handle = errorHandler(handlerLayer.handle);
+      }
+    });
+  }
+});
 
 module.exports = router;

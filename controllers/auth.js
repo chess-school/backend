@@ -21,7 +21,7 @@ const generateAccessToken = (id, roles, sessionTokenVersion) => {
 };
 
 // 📝 Registration
-const registration = errorHandler(async (req, res) => {
+const registration = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
@@ -72,10 +72,10 @@ const registration = errorHandler(async (req, res) => {
     lastName: user.lastName,
     token: encodeURIComponent(verificationToken),
   });
-});
+};
 
 // 🔐 Login
-const login = errorHandler(async (req, res) => {
+const login = async (req, res) => {
     const email = req.body.email.trim().toLowerCase();
     const password = req.body.password;
 
@@ -93,10 +93,10 @@ const login = errorHandler(async (req, res) => {
     const token = generateAccessToken(user._id, user.roles, user.sessionTokenVersion);
 
     res.status(200).json({ user, token });
-});
+};
 
 // ✅ Verify email
-const verifyEmail = errorHandler(async (req, res) => {
+const verifyEmail = async (req, res) => {
   const user = await User.findOne({ verificationToken: req.query.token, emailVerified: false });
   if (!user) return res.status(400).json({ msg: 'Invalid or expired token' });
 
@@ -105,47 +105,43 @@ const verifyEmail = errorHandler(async (req, res) => {
   await user.save();
 
   res.json({ msg: 'Email verified successfully' });
-});
+};
 
 // 🔁 Resend verification email
-const resendVerificationEmail = errorHandler(async (req, res) => {
-  const user = await User.findOne({ email: req.body.email }); // Искать лучше по email
+const resendVerificationEmail = async (req, res) => {
+  const user = await User.findOne({ email: req.body.email });
   if (!user) return res.status(404).json({ msg: 'User not found' });
 
   if (user.emailVerified) {
     return res.status(200).json({ msg: 'Email is already verified.' });
   }
 
-  // Создаем новый токен
   const salt = await bcrypt.genSalt(10);
   const newToken = await bcrypt.hash(Date.now().toString(), salt);
   user.verificationToken = newToken;
-  // Можно добавить поле для отслеживания последней отправки, если нужно
-  // user.lastEmailSent = new Date();
   await user.save();
 
-  // 👇 --- ИЗМЕНЕНИЕ 3: ВЫЗЫВАЕМ НОВУЮ ФУНКЦИЮ ---
   await sendVerificationEmail(user.email, newToken);
 
   res.json({ msg: 'Verification email resent successfully' });
-});
+};
 
 // ✅ Check email verification status
-const checkVerificationStatus = errorHandler(async (req, res) => {
+const checkVerificationStatus = async (req, res) => {
   const user = await User.findOne({ verificationToken: req.body.token });
   if (!user) return res.status(404).json({ msg: 'Invalid or expired token' });
 
   res.json({ emailVerified: user.emailVerified });
-});
+};
 
 // 👥 Get all users (admin only)
-const getUsers = errorHandler(async (req, res) => {
+const getUsers = async (req, res) => {
   const users = await User.find();
   res.json(users);
-});
+};
 
 // 👤 Get current user profile
-const getProfile = errorHandler(async (req, res) => {
+const getProfile = async (req, res) => {
   const user = await User.findById(req.user.id).select('-password');
   if (!user) return res.status(404).json({ msg: 'User not found' });
 
@@ -155,10 +151,10 @@ const getProfile = errorHandler(async (req, res) => {
     : null;
 
   res.json(profile);
-});
+};
 
 // 🖼 Get avatar image by user ID
-const getAvatar = errorHandler(async (req, res) => {
+const getAvatar = async (req, res) => {
   const user = await User.findById(req.params.id);
   if (!user || !user.avatar?.data) {
     return res.status(404).json({ msg: 'Avatar not found' });
@@ -166,10 +162,10 @@ const getAvatar = errorHandler(async (req, res) => {
 
   res.set('Content-Type', user.avatar.contentType);
   res.send(user.avatar.data);
-});
+};
 
 // ✏️ Update profile
-const updateProfile = errorHandler(async (req, res) => {
+const updateProfile = async (req, res) => {
   const user = await User.findById(req.user.id);
   if (!user) return res.status(404).json({ msg: 'User not found' });
 
@@ -227,7 +223,7 @@ const updateProfile = errorHandler(async (req, res) => {
       ...(user.roles.includes('coach') && { coachProfile: user.coachProfile }),
     },
   });
-});
+};
 
 module.exports = {
   registration,

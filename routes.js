@@ -15,7 +15,7 @@ const roleMiddleware = require('./middleware/role');
 const validateRequest = require('./middleware/validateRequest');
 const upload = require('./middleware/upload');
 const HomeworkController  = require('./controllers/homework');
-const errorHandler = require('../middleware/errorHandler');
+const errorHandler = require('./middleware/errorHandler');
 
 //Auth
 router.post(

@@ -3,40 +3,22 @@ const path = require('path');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
-const nodemailer = require('nodemailer');
 const User = require('../models/User');
 const Player = require('../models/Player');
 const Role = require('../models/Role');
-const { auth } = require('../config/firebase');
 const errorHandler = require('../middleware/errorHandler');
 const { sendVerificationEmail } = require('../utils/nodemailer');
 
 // 🔐 Generate JWT Token
-const generateAccessToken = (id, roles) => {
-  return jwt.sign({ id, roles }, process.env.JWT_SECRET, { expiresIn: "24h" });
+const generateAccessToken = (id, roles, sessionTokenVersion) => {
+    const payload = {
+        id: id,
+        roles: roles,
+        sessionTokenVersion: sessionTokenVersion
+    };
+    
+    return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '6h' });
 };
-
-// // 📧 Mail transporter setup (Mailtrap)
-// const transporter = nodemailer.createTransport({
-//   host: process.env.MAILTRAP_HOST,
-//   port: process.env.MAILTRAP_PORT,
-//   auth: {
-//     user: process.env.MAILTRAP_USER,
-//     pass: process.env.MAILTRAP_PASS,
-//   },
-// });
-
-// 📩 Send verification email
-// const sendVerificationEmail = async (email, token) => {
-//   const verificationUrl = `${process.env.BASE_URL}/auth/verify-email?token=${encodeURIComponent(token)}`;
-//   const mailOptions = {
-//     from: '"Chess School" <no-reply@chess-school.com>',
-//     to: email,
-//     subject: 'Verify your email',
-//     html: `<p>Welcome to Chess School!</p><p>Please confirm your email:</p><a href="${verificationUrl}">${verificationUrl}</a>`,
-//   };
-//   await transporter.sendMail(mailOptions);
-// };
 
 // 📝 Registration
 const registration = errorHandler(async (req, res) => {
@@ -81,7 +63,6 @@ const registration = errorHandler(async (req, res) => {
   });
   await player.save();
 
-  // 👇 --- ИЗМЕНЕНИЕ 4: ВЫЗЫВАЕМ НОВУЮ ФУНКЦИЮ ---
   await sendVerificationEmail(req.body.email, verificationToken, req.t);
 
   res.status(201).json({
@@ -89,26 +70,29 @@ const registration = errorHandler(async (req, res) => {
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,
-    // Не рекомендуется отправлять токен обратно в чистом виде, но если он нужен для фронтенда:
     token: encodeURIComponent(verificationToken),
   });
 });
 
 // 🔐 Login
 const login = errorHandler(async (req, res) => {
-  const email = req.body.email.trim().toLowerCase();
-  const password = req.body.password;
+    const email = req.body.email.trim().toLowerCase();
+    const password = req.body.password;
 
-  const user = await User.findOne({ email: email });
-  if (!user) return res.status(400).json({ msg: 'User not found' });
+    const user = await User.findOne({ email: email });
+    if (!user) return res.status(400).json({ msg: 'User not found' });
 
-  if (!user.emailVerified) return res.status(400).json({ msg: 'Please verify your email first' });
+    if (!user.emailVerified) return res.status(400).json({ msg: 'Please verify your email first' });
 
-  const isPasswordMatch = await bcrypt.compare(password, user.password);
-  if (!isPasswordMatch) return res.status(400).json({ msg: 'Invalid credentials' });
+    const isPasswordMatch = await bcrypt.compare(password, user.password);
+    if (!isPasswordMatch) return res.status(400).json({ msg: 'Invalid credentials' });
 
-  const token = generateAccessToken(user._id, user.roles);
-  res.status(200).json({ user, token });
+    user.sessionTokenVersion = (user.sessionTokenVersion || 0) + 1;
+    await user.save();
+
+    const token = generateAccessToken(user._id, user.roles, user.sessionTokenVersion);
+
+    res.status(200).json({ user, token });
 });
 
 // ✅ Verify email

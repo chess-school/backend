@@ -43,11 +43,10 @@ const sendVerificationEmail = async (email, token, t) => {
     ? `"Chess School" <${process.env.PROD_MAIL_USER}>`
     : '"Chess School (Dev)" <no-reply@chess-school.com>';
 
-  // --- ИЗМЕНЕНИЕ 2: Используем функцию 't' для всех текстов ---
   const mailOptions = {
     from: fromAddress,
     to: email,
-    subject: t('email.verificationSubject'), // Тема из файла перевода
+    subject: t('email.verificationSubject'), 
     html: `
       <div style="font-family: sans-serif; padding: 20px; color: #333;">
         <h2>${t('email.welcome')}</h2>

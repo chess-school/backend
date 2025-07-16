@@ -60,6 +60,10 @@ const UserSchema = new mongoose.Schema({
         price: { type: Number, default: 0 },
         services: { type: [String], default: [] }
     },
+    sessionTokenVersion: {
+        type: Number,
+        default: 0
+    },
     registrationDate: {
         type: Date,
         default: Date.now

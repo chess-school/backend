@@ -1,12 +1,11 @@
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const Request = require('../models/Request');
-const errorHandler = require('../middleware/errorHandler');
 const { findUserByEmail, findUserById, checkUserRole } = require('../utils/userUtils');
 const mongoose = require('mongoose');
 
 // 🔁 1. Обновление coach-профиля
-const updateCoachProfile = errorHandler(async (req, res) => {
+const updateCoachProfile = async (req, res) => {
   const user = await User.findById(req.user.id);
   if (!user || !user.roles.includes('coach')) {
     return res.status(403).json({ msg: 'Access denied' });
@@ -27,10 +26,10 @@ const updateCoachProfile = errorHandler(async (req, res) => {
     msg: 'Coach profile updated',
     coachProfile: user.coachProfile,
   });
-});
+};
 
 // 🔁 2. Назначить студента тренеру
-const assignStudent = errorHandler(async (req, res) => {
+const assignStudent = async (req, res) => {
   const { coachEmail, studentEmail } = req.body;
   const coach = await findUserByEmail(coachEmail);
   checkUserRole(coach, 'coach');
@@ -54,10 +53,10 @@ const assignStudent = errorHandler(async (req, res) => {
   }
 
   res.json({ msg: 'Student assigned to coach successfully', student });
-});
+};
 
 // 🔁 3. Получить всех тренеров
-const getCoaches = errorHandler(async (req, res) => {
+const getCoaches = async (req, res) => {
   const coaches = await User.find({ roles: 'coach' }).select('-password');
 
   const formatted = coaches.map(coach => ({
@@ -68,10 +67,10 @@ const getCoaches = errorHandler(async (req, res) => {
   }));
 
   res.status(200).json(formatted);
-});
+};
 
 // 🔁 4. Получить тренеров по email
-const getCoachesByEmail = errorHandler(async (req, res) => {
+const getCoachesByEmail = async (req, res) => {
   const { emails } = req.body;
 
   if (!Array.isArray(emails) || emails.length === 0) {
@@ -92,10 +91,10 @@ const getCoachesByEmail = errorHandler(async (req, res) => {
   }));
 
   res.json(formatted);
-});
+};
 
 // 🔁 5. Получить студентов тренера
-const getStudents = errorHandler(async (req, res) => {
+const getStudents = async (req, res) => {
   const { coachEmail } = req.query;
   const coach = await findUserByEmail(coachEmail);
   checkUserRole(coach, 'coach');
@@ -107,10 +106,10 @@ const getStudents = errorHandler(async (req, res) => {
   const studentIds = coach.students.map(s => s._id ? s._id.toString() : s.toString());
 
   res.json(studentIds);
-});
+};
 
 // 🔁 6. Удалить студента у тренера
-const removeStudent = errorHandler(async (req, res) => {
+const removeStudent = async (req, res) => {
   const { coachEmail, studentId } = req.query;
   
   if (!coachEmail || !studentId) {
@@ -142,17 +141,17 @@ const removeStudent = errorHandler(async (req, res) => {
   );
   
   res.status(200).json({ msg: 'Student has been successfully unassigned from the coach.' });
-});
+};
 
 // 🔁 7. Получить тренера по ID
-const getCoachById = errorHandler(async (req, res) => {
+const getCoachById = async (req, res) => {
   const { id } = req.params;
   const coach = await findUserById(id);
   res.json(coach);
-});
+};
 
 // 🔁 8. Получить студента по ID
-const getStudentById = errorHandler(async (req, res) => {
+const getStudentById = async (req, res) => {
   const { coachEmail, studentId } = req.query;
   
   if (!coachEmail || !studentId) {
@@ -173,20 +172,20 @@ const getStudentById = errorHandler(async (req, res) => {
   }
 
   res.json(student);
-});
+};
 
 // 🔁 9. Получить заявки тренеру
-const getRequests = errorHandler(async (req, res) => {
+const getRequests = async (req, res) => {
   const coachId = req.user.id;
   const requests = await Request.find({ coach: coachId })
     .populate('student', 'firstName lastName email')
     .select('student experience goals createdAt status');
 
   res.status(200).json(requests);
-});
+};
 
 // 🔁 10. Создать заявку
-const createRequest = errorHandler(async (req, res) => {
+const createRequest = async (req, res) => {
   const studentId = req.user.id;
   const { coachId, experience, goals } = req.body;
 
@@ -215,10 +214,10 @@ const createRequest = errorHandler(async (req, res) => {
   }).save();
 
   res.status(201).json({ msg: 'Request successfully sent' });
-});
+};
 
 // 🔁 11. Обработка заявки
-const handleRequest = errorHandler(async (req, res) => {
+const handleRequest = async (req, res) => {
   const { request_id } = req.query;
   const { status } = req.body;
 
@@ -258,7 +257,7 @@ const handleRequest = errorHandler(async (req, res) => {
   }).save();
 
   res.status(200).json({ msg: `Request ${status}` });
-});
+};
 
 module.exports = {
   updateCoachProfile,

@@ -1,9 +1,8 @@
 const Schedule = require('../models/Schedule');
 const User = require('../models/User');
 const Joi = require('joi');
-const errorHandler = require('../middleware/errorHandler');
 
-const createSchedule = errorHandler(async (req, res) => {
+const createSchedule = async (req, res) => {
   const schema = Joi.object({
     studentId: Joi.string().required(),
     date: Joi.date().iso().required(),
@@ -40,22 +39,22 @@ const createSchedule = errorHandler(async (req, res) => {
 
   await schedule.save();
   res.status(201).json(schedule);
-});
+};
 
-const getSchedule = errorHandler(async (req, res) => {
+const getSchedule = async (req, res) => {
   const { studentId } = req.params;
   const schedule = await Schedule.find({ student: studentId }).sort('date');
   res.json(schedule);
-});
+};
 
-const getCoachSchedule = errorHandler(async (req, res) => {
+const getCoachSchedule = async (req, res) => {
   const schedule = await Schedule.find({ coach: req.user.id })
     .populate('student', 'firstName lastName email')
     .sort('date');
   res.json(schedule);
-});
+};
 
-const getScheduleByDate = errorHandler(async (req, res) => {
+const getScheduleByDate = async (req, res) => {
   const { date, type } = req.query;
   if (!date) {
     return res.status(400).json({ msg: 'Date is required' });
@@ -77,9 +76,9 @@ const getScheduleByDate = errorHandler(async (req, res) => {
     .sort('date');
 
   res.json(schedule);
-});
+};
 
-const updateSchedule = errorHandler(async (req, res) => {
+const updateSchedule = async (req, res) => {
   const { id } = req.params;
   const { date, title, description, link, type, status } = req.body;
   
@@ -100,9 +99,9 @@ const updateSchedule = errorHandler(async (req, res) => {
 
   await schedule.save();
   res.json(schedule);
-});
+};
 
-const markComplete = errorHandler(async (req, res) => {
+const markComplete = async (req, res) => {
   const { id } = req.params;
   
   const schedule = await Schedule.findById(id);
@@ -116,9 +115,9 @@ const markComplete = errorHandler(async (req, res) => {
   schedule.status = 'completed';
   await schedule.save();
   res.json({ msg: 'Schedule marked as completed' });
-});
+};
 
-const deleteSchedule = errorHandler(async (req, res) => {
+const deleteSchedule = async (req, res) => {
   const { id } = req.params;
   
   const result = await Schedule.findByIdAndDelete(id);
@@ -127,14 +126,14 @@ const deleteSchedule = errorHandler(async (req, res) => {
   }
 
   res.json({ message: 'Schedule deleted successfully' });
-});
+};
 
-const deleteStudentSchedule = errorHandler(async (req, res) => {
+const deleteStudentSchedule = async (req, res) => {
   const { studentId } = req.params;
   
   await Schedule.deleteMany({ student: studentId });
   res.json({ msg: 'All schedule entries deleted for this student' });
-});
+};
 
 module.exports = {
   createSchedule,

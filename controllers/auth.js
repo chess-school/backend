@@ -6,7 +6,6 @@ const { validationResult } = require('express-validator');
 const User = require('../models/User');
 const Player = require('../models/Player');
 const Role = require('../models/Role');
-const errorHandler = require('../middleware/errorHandler');
 const { sendVerificationEmail } = require('../utils/nodemailer');
 
 // 🔐 Generate JWT Token
@@ -20,7 +19,7 @@ const generateAccessToken = (id, roles, sessionTokenVersion) => {
     return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '6h' });
 };
 
-// 📝 Registration
+// 📝 Registration 
 const registration = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -76,16 +75,17 @@ const registration = async (req, res) => {
 
 // 🔐 Login
 const login = async (req, res) => {
+    const { t } = req;
     const email = req.body.email.trim().toLowerCase();
     const password = req.body.password;
 
     const user = await User.findOne({ email: email });
-    if (!user) return res.status(400).json({ msg: 'User not found' });
+    if (!user) return res.status(400).json({ msg: t('api.auth.userNotFound') });
 
-    if (!user.emailVerified) return res.status(400).json({ msg: 'Please verify your email first' });
+    if (!user.emailVerified) return res.status(400).json({ msg: t('api.auth.verifyEmailFirst') });
 
     const isPasswordMatch = await bcrypt.compare(password, user.password);
-    if (!isPasswordMatch) return res.status(400).json({ msg: 'Invalid credentials' });
+    if (!isPasswordMatch) return res.status(400).json({ msg: t('api.auth.invalidCredentials') });
 
     user.sessionTokenVersion = (user.sessionTokenVersion || 0) + 1;
     await user.save();
@@ -97,23 +97,25 @@ const login = async (req, res) => {
 
 // ✅ Verify email
 const verifyEmail = async (req, res) => {
+  const { t } = req;
   const user = await User.findOne({ verificationToken: req.query.token, emailVerified: false });
-  if (!user) return res.status(400).json({ msg: 'Invalid or expired token' });
+  if (!user) return res.status(400).json({ msg: t('api.auth.invalidToken') });
 
   user.emailVerified = true;
   user.verificationToken = undefined;
   await user.save();
 
-  res.json({ msg: 'Email verified successfully' });
+  res.json({ msg: t('api.auth.emailVerifiedSuccess') });
 };
 
 // 🔁 Resend verification email
 const resendVerificationEmail = async (req, res) => {
+  const { t } = req;
   const user = await User.findOne({ email: req.body.email });
-  if (!user) return res.status(404).json({ msg: 'User not found' });
+  if (!user) return res.status(404).json({ msg: t('api.auth.userNotFound') });
 
   if (user.emailVerified) {
-    return res.status(200).json({ msg: 'Email is already verified.' });
+    return res.status(200).json({ msg: t('api.auth.emailAlreadyVerified') });
   }
 
   const salt = await bcrypt.genSalt(10);
@@ -121,20 +123,20 @@ const resendVerificationEmail = async (req, res) => {
   user.verificationToken = newToken;
   await user.save();
 
-  await sendVerificationEmail(user.email, newToken);
+  await sendVerificationEmail(user.email, newToken, t);
 
-  res.json({ msg: 'Verification email resent successfully' });
+  res.json({ msg: t('api.auth.verificationResentSuccess') });
 };
 
 // ✅ Check email verification status
 const checkVerificationStatus = async (req, res) => {
+  const { t } = req;
   const user = await User.findOne({ verificationToken: req.body.token });
-  if (!user) return res.status(404).json({ msg: 'Invalid or expired token' });
+  if (!user) return res.status(404).json({ msg: t('api.auth.invalidToken') });
 
   res.json({ emailVerified: user.emailVerified });
 };
 
-// 👥 Get all users (admin only)
 const getUsers = async (req, res) => {
   const users = await User.find();
   res.json(users);
@@ -142,8 +144,9 @@ const getUsers = async (req, res) => {
 
 // 👤 Get current user profile
 const getProfile = async (req, res) => {
+  const { t } = req;
   const user = await User.findById(req.user.id).select('-password');
-  if (!user) return res.status(404).json({ msg: 'User not found' });
+  if (!user) return res.status(404).json({ msg: t('api.auth.userNotFound') });
 
   const profile = user.toObject();
   profile.photoUrl = user.avatar?.data
@@ -155,9 +158,10 @@ const getProfile = async (req, res) => {
 
 // 🖼 Get avatar image by user ID
 const getAvatar = async (req, res) => {
+  const { t } = req;
   const user = await User.findById(req.params.id);
   if (!user || !user.avatar?.data) {
-    return res.status(404).json({ msg: 'Avatar not found' });
+    return res.status(404).json({ msg: t('api.auth.avatarNotFound') });
   }
 
   res.set('Content-Type', user.avatar.contentType);
@@ -166,10 +170,10 @@ const getAvatar = async (req, res) => {
 
 // ✏️ Update profile
 const updateProfile = async (req, res) => {
+  const { t } = req;
   const user = await User.findById(req.user.id);
-  if (!user) return res.status(404).json({ msg: 'User not found' });
+  if (!user) return res.status(404).json({ msg: t('api.auth.userNotFound') });
 
-  // Coach profile section
   if (user.roles.includes('coach')) {
     user.coachProfile = {
       ...user.coachProfile,
@@ -183,26 +187,23 @@ const updateProfile = async (req, res) => {
     };
   }
 
-  // 🔒 Change password
   if (req.body.newPassword) {
     if (!req.body.currentPassword) {
-      return res.status(400).json({ msg: 'Current password is required' });
+      return res.status(400).json({ msg: t('api.auth.currentPasswordRequired') });
     }
 
     const isMatch = await bcrypt.compare(req.body.currentPassword, user.password);
     if (!isMatch) {
-      return res.status(400).json({ msg: 'Invalid current password' });
+      return res.status(400).json({ msg: t('api.auth.invalidCurrentPassword') });
     }
 
-    user.password = req.body.newPassword; // 🔐 Will be hashed automatically on save
+    user.password = req.body.newPassword; 
   }
 
-  // 📝 Update other profile fields
   user.firstName = req.body.firstName || user.firstName;
   user.lastName = req.body.lastName || user.lastName;
   user.email = req.body.email || user.email;
 
-  // 🖼 Update avatar if provided
   if (req.file) {
     user.avatar = {
       data: req.file.buffer,
@@ -213,7 +214,7 @@ const updateProfile = async (req, res) => {
   await user.save();
 
   res.json({
-    msg: 'Profile updated',
+    msg: t('api.auth.profileUpdatedSuccess'),
     user: {
       id: user._id,
       firstName: user.firstName,

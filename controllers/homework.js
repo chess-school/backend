@@ -1,9 +1,8 @@
 const Homework = require('../models/Homework');
 const Schedule = require('../models/Schedule'); 
-const errorHandler = require('../middleware/errorHandler');
 const Notification = require('../models/Notification');
 
-const sendHomework = errorHandler(async (req, res) => {
+const sendHomework = async (req, res) => {
   const { studentId, scheduleId, homeworkText } = req.body;
 
   if (!studentId || !scheduleId) {
@@ -40,9 +39,9 @@ const sendHomework = errorHandler(async (req, res) => {
   await scheduleEvent.save();
 
   res.status(201).json({ msg: 'Homework submitted successfully.', homework: newHomework });
-});
+};
 
-const getHomeworkForReview = errorHandler(async (req, res) => {
+const getHomeworkForReview = async (req, res) => {
   const coachId = req.user.id;
 
   const homeworksRaw = await Homework.find({ coach: coachId, status: 'pending' })
@@ -58,9 +57,9 @@ const getHomeworkForReview = errorHandler(async (req, res) => {
   }));
   
   res.status(200).json(homeworks);
-});
+};
 
-const reviewHomework = errorHandler(async (req, res) => {
+const reviewHomework = async (req, res) => {
     const { homeworkId } = req.params;
     const { status, comment } = req.body;
 
@@ -98,9 +97,9 @@ const reviewHomework = errorHandler(async (req, res) => {
     await newNotification.save();
     
     res.status(200).json({ msg: 'Homework reviewed successfully.', homework });
-});
+};
 
-const getHomeworkScreenshot = errorHandler(async (req, res) => {
+const getHomeworkScreenshot = async (req, res) => {
     const homework = await Homework.findById(req.params.id);
 
     if (!homework || !homework.screenshot || !homework.screenshot.data) {
@@ -109,7 +108,7 @@ const getHomeworkScreenshot = errorHandler(async (req, res) => {
 
     res.set('Content-Type', homework.screenshot.contentType);
     res.send(homework.screenshot.data);
-});
+};
 
 module.exports = {
   sendHomework,

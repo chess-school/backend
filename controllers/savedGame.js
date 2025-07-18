@@ -1,9 +1,8 @@
 const SavedGame = require('../models/SavedGame');
 const User = require('../models/User');
-const errorHandler = require('../middleware/errorHandler');
 
 // 💾 Сохранить партию для студента (только для тренеров)
-const saveGameForStudent = errorHandler(async (req, res) => {
+const saveGameForStudent = async (req, res) => {
     const { studentId, pgn, title, description } = req.body;
     const coachId = req.user.id; // ID тренера берется из токена
 
@@ -42,10 +41,10 @@ const saveGameForStudent = errorHandler(async (req, res) => {
     await newSavedGame.save();
 
     res.status(201).json({ msg: 'Game saved successfully!', game: newSavedGame });
-});
+};
 
 
-const getMySavedGames = errorHandler(async (req, res) => {
+const getMySavedGames = async (req, res) => {
     const studentId = req.user.id; 
 
     const games = await SavedGame.find({ student: studentId })
@@ -57,7 +56,7 @@ const getMySavedGames = errorHandler(async (req, res) => {
     }
 
     res.status(200).json(games);
-});
+};
 
 module.exports = {
     saveGameForStudent,

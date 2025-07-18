@@ -1,7 +1,30 @@
 {
   "api": {
     "userExistsError": "User with this email already exists",
-    "registrationSuccess": "Registration successful. Please check your email to verify your account."
+    "registrationSuccess": "Registration successful. Please check your email to verify your account.",
+
+    "admin": {
+      "roleAlreadyExists": "User already has this role",
+      "roleNotFound": "User does not have the specified role",
+      "invalidAction": "Invalid action provided. Use 'add' or 'remove'.",
+      "roleAddedSuccess": "Role '{role}' added successfully.",
+      "roleRemovedSuccess": "Role '{role}' removed successfully.",
+      "userNotFound": "User not found.",
+      "adminsNotFound": "No administrators found."
+    },
+  "auth": {
+      "userNotFound": "User not found.",
+      "verifyEmailFirst": "Please verify your email first.",
+      "invalidCredentials": "Invalid credentials.",
+      "invalidToken": "Invalid or expired token.",
+      "emailVerifiedSuccess": "Email verified successfully.",
+      "emailAlreadyVerified": "This email address is already verified.",
+      "verificationResentSuccess": "Verification email has been resent successfully.",
+      "avatarNotFound": "Avatar not found.",
+      "currentPasswordRequired": "Current password is required to set a new one.",
+      "invalidCurrentPassword": "The current password you entered is incorrect.",
+      "profileUpdatedSuccess": "Profile updated successfully."
+    }
   },
   "email": {
     "verificationSubject": "Confirm your email at Chess School",

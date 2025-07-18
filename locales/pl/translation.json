@@ -1,13 +1,23 @@
 {
   "api": {
-    "userExistsError": "Użytkownik o tym adresie e-mail już istnieje",
-    "registrationSuccess": "Rejestracja pomyślna. Sprawdź e-mail, aby zweryfikować swoje konto."
+    "userExistsError": "Użytkownik z tym adresem e-mail już istnieje",
+    "registrationSuccess": "Rejestracja udana. Sprawdź swoją pocztę e-mail, aby zweryfikować konto.",
+
+    "admin": {
+      "roleAlreadyExists": "Użytkownik już posiada tę rolę",
+      "roleNotFound": "Użytkownik nie posiada podanej roli",
+      "invalidAction": "Nieprawidłowa akcja. Użyj 'add' (dodaj) lub 'remove' (usuń).",
+      "roleAddedSuccess": "Rola '{role}' została pomyślnie dodana.",
+      "roleRemovedSuccess": "Rola '{role}' została pomyślnie usunięta.",
+      "userNotFound": "Nie znaleziono użytkownika.",
+      "adminsNotFound": "Nie znaleziono administratorów."
+    }
   },
   "email": {
-    "verificationSubject": "Potwierdź swój e-mail w Chess School",
+    "verificationSubject": "Potwierdź swój e-mail w Szkole Szachowej",
     "welcome": "Witaj w Szkole Szachowej!",
-    "instruction": "Jeszcze tylko jeden krok. Potwierdź swój adres e-mail, klikając poniższy przycisk:",
-    "buttonText": "Potwierdź E-mail",
-    "linkInstruction": "Jeśli przycisk не działa, skopiuj i wklej ten link do przeglądarki:"
+    "instruction": "Jeszcze tylko jeden krok. Potwierdź swój adres e-mail, klikając przycisk poniżej:",
+    "buttonText": "Potwierdź e-mail",
+    "linkInstruction": "Jeśli przycisk nie działa, skopiuj i wklej ten link do przeglądarki:"
   }
 }

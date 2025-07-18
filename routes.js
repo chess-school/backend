@@ -67,6 +67,12 @@ router.get(
     authController.getProfile
 );
 
+router.get(
+    '/auth/profile/:userId',
+    authMiddleware,
+    authController.getProfileById
+);
+
 router.put(
     '/auth/profile',
     authMiddleware,

@@ -143,46 +143,40 @@ const getUsers = async (req, res) => {
   res.json(users);
 };
 
-// 👤 Get current user profile
-const getProfile = async (req, res) => {
-  const { t } = req;
-  const user = await User.findById(req.user.id).select('-password');
-  if (!user) return res.status(404).json({ msg: t('api.auth.userNotFound') });
+// // 👤 Get current user profile
+// const getProfile = async (req, res) => {
+//   const { t } = req;
+//   const user = await User.findById(req.user.id).select('-password');
+//   if (!user) return res.status(404).json({ msg: t('api.auth.userNotFound') });
 
-  const profile = user.toObject();
-  profile.photoUrl = user.avatar?.data
-    ? `${process.env.BASE_URL}/auth/avatar/${user._id}`
-    : null;
+//   const profile = user.toObject();
+//   profile.photoUrl = user.avatar?.data
+//     ? `${process.env.BASE_URL}/auth/avatar/${user._id}`
+//     : null;
 
-  res.json(profile);
-};
+//   res.json(profile);
+// };
 
 const getProfileById = async (req, res) => {
-    const { userId } = req.params; // Получаем ID из параметров URL
+    const { userId } = req.params; 
 
-    // Проверяем, валидный ли ID, чтобы избежать ошибок от Mongoose
     if (!mongoose.Types.ObjectId.isValid(userId)) {
         return res.status(400).json({ msg: 'Invalid user ID format' });
     }
 
-    // Ищем пользователя, но исключаем чувствительные поля
     const user = await User.findById(userId)
         .select('-password -verificationToken -sessionTokenVersion'); 
     
     if (!user) {
-        // Используем ключ, который у вас уже переведен
         return res.status(404).json({ msg: req.t('api.auth.userNotFound') });
     }
 
-    // Преобразуем документ Mongoose в обычный объект для модификации
     const profile = user.toObject();
 
-    // Формируем URL для аватара, так же, как в getProfile
     profile.photoUrl = user.avatar?.data
-        ? `${process.env.BASE_URL}/api/auth/avatar/${user._id}` // Убедитесь, что BASE_URL и путь правильные
+        ? `${process.env.BASE_URL}/api/auth/avatar/${user._id}` 
         : null;
 
-    // Отправляем только публичные данные
     res.json(profile);
 };
 
@@ -264,7 +258,7 @@ module.exports = {
   resendVerificationEmail,
   checkVerificationStatus,
   getUsers,
-  getProfile,
+  // getProfile,
   getProfileById,
   getAvatar,
   updateProfile,

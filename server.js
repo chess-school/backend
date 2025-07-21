@@ -5,6 +5,7 @@ const cors = require('cors');
 const connectDB = require('./config/db');
 const i18nextMiddleware = require('./config/i18n');
 const initializeSocket = require('./sockets/game.sockets');
+const rateLimit = require('express-rate-limit');
 
 dotenv.config();
 connectDB();
@@ -45,6 +46,16 @@ publicRouter.get('/ping', (req, res) => {
     res.status(200).send('Pong!');
 });
 
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 150, 
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: 'Too many requests from this IP, please try again after 15 minutes',
+});
+
+
+app.use('/api', apiLimiter);
 app.use('/api', publicRouter);
 
 app.use(express.json());

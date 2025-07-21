@@ -61,11 +61,11 @@ router.get(
     authController.getAvatar
   );  
 
-router.get(
-    '/auth/profile',
-    authMiddleware,
-    authController.getProfile
-);
+// router.get(
+//     '/auth/profile',
+//     authMiddleware,
+//     authController.getProfile
+// );
 
 router.get(
     '/auth/profile/:userId',

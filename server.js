@@ -40,11 +40,10 @@ const corsOptions = {
     allowedHeaders: ['Content-Type', 'Authorization']
 };
 
-const publicRouter = express.Router();
-publicRouter.get('/ping', (req, res) => {
-    console.log(`Received keep-alive ping at: ${new Date().toISOString()}`);
-    res.status(200).send('Pong!');
-});
+app.use(cors(corsOptions));
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -53,15 +52,18 @@ const apiLimiter = rateLimit({
     legacyHeaders: false,
     message: 'Too many requests from this IP, please try again after 15 minutes',
 });
-
-
 app.use('/api', apiLimiter);
+
+app.use(i18nextMiddleware); 
+
+const publicRouter = express.Router();
+publicRouter.get('/ping', (req, res) => {
+    console.log(`Received keep-alive ping at: ${new Date().toISOString()}`);
+    res.status(200).send('Pong!');
+});
 app.use('/api', publicRouter);
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(i18nextMiddleware); 
-app.use(cors(corsOptions));
+
 
 app.use('/api', require('./routes'));
 

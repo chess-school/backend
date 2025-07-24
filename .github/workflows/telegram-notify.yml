@@ -1,0 +1,65 @@
+# Имя нашего рабочего процесса, отображается в GitHub Actions
+name: Telegram Notification
+
+# Триггер: на что реагирует наш процесс
+on:
+  push:
+    # Запускать только при пуше в ветку 'main'
+    branches:
+      - main
+    # Если ваша основная ветка называется 'master', замените 'main' на 'master'
+
+# Задачи, которые будут выполняться
+jobs:
+  send_notification:
+    # Запускаем на последней версии Ubuntu
+    runs-on: ubuntu-latest
+
+    steps:
+      # Шаг 1: Получаем доступ к коду репозитория
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          # Нам нужна история коммитов, чтобы получить сообщение последнего коммита
+          fetch-depth: 2
+
+      # Шаг 2: Получаем информацию о последнем коммите
+      - name: Get commit information and escape markdown
+        id: commit_info
+        run: |
+          # Эта функция будет экранировать все специальные символы MarkdownV2
+          escape_markdown() {
+            echo "$1" | sed -e 's/_/\\_/g' -e 's/\*/\\*/g' -e 's/\[/\\[/g' -e 's/\]/\\]/g' -e 's/(/\\(/g' -e 's/)/\\)/g' -e 's/~/\\~/g' -e 's/`/\\`/g' -e 's/>/\\>/g' -e 's/#/\\#/g' -e 's/+/\\+/g' -e 's/-/\\-/g' -e 's/=/\\=/g' -e 's/|/\\|/g' -e 's/{/\\{/g' -e 's/}/\\}/g' -e 's/\./\\./g' -e 's/!/\\!/g'
+          }
+
+          # Получаем сырые данные
+          RAW_AUTHOR=$(git log -1 --pretty=format:'%an')
+          RAW_MESSAGE=$(git log -1 --pretty=format:'%s')
+          RAW_HASH=$(git log -1 --pretty=format:'%h')
+
+          # Экранируем данные перед использованием
+          AUTHOR=$(escape_markdown "$RAW_AUTHOR")
+          MESSAGE=$(escape_markdown "$RAW_MESSAGE")
+          HASH=$(escape_markdown "$RAW_HASH")
+
+          # Ссылка на коммит не нуждается в экранировании
+          URL="https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
+
+          # Передаем переменные в следующие шаги
+          echo "commit_author=$AUTHOR" >> $GITHUB_OUTPUT
+          echo "commit_message=$MESSAGE" >> $GITHUB_OUTPUT
+          echo "commit_hash=$HASH" >> $GITHUB_OUTPUT
+          echo "commit_url=$URL" >> $GITHUB_OUTPUT
+
+      # Шаг 3: Формируем и отправляем сообщение в Telegram
+      - name: Send Telegram message
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdownv2 # Продолжаем использовать markdownv2, т.к. мы все экранировали
+          message: |
+            *Новый коммит на бекенде в ветке `main`* 🚀
+
+            *Автор:* ${{ steps.commit_info.outputs.commit_author }}
+            *Сообщение:* `${{ steps.commit_info.outputs.commit_message }}`

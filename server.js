@@ -41,6 +41,12 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use(
+  '/api/v2/payments/webhook', 
+  express.raw({ type: 'application/json' }),
+  require('./v2/routes/webhook.router') // <--- Мы создадим этот новый, отдельный файл
+);
+
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -66,6 +72,7 @@ app.use('/api', publicRouter);
 
 
 app.use('/api', require('./routes'));
+app.use('/api/v2', require('./v2/routes'));
 
 initializeSocket(server);
 

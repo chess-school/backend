@@ -12,6 +12,8 @@ const paymentRoutes = require('./payment.routes');
 const scheduleRoutes = require('./schedule.routes');
 const notificationRoutes = require('./notification.routes');
 const chatRoutes = require('./chat.routes');
+const puzzleRoutes = require('./puzzle.routes');
+const chessDB = require('./chessDB.routes');
 
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
@@ -24,5 +26,7 @@ router.use('/schedule', scheduleRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/conversations', chatRoutes); 
 router.use('/admin', adminRoutes);
+router.use('/puzzles', puzzleRoutes);
+router.use('/chessdb', chessDB);
 
 module.exports = router;

@@ -1,67 +1,45 @@
-// models/Puzzle.js
-
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
+// 1. ВАША СХЕМА (она была правильной)
 const PuzzleSchema = new Schema({
-    // --- ОСНОВНАЯ ИНФОРМАЦИЯ О ЗАДАЧЕ ---
-    fen: { // Начальная позиция задачи в FEN. Это важнее, чем PGN.
+    _id: {
         type: String,
         required: true,
     },
-    solution: { // Последовательность ходов решения в SAN
+    fen: {
+        type: String,
+        required: true,
+    },
+    moves: {
         type: [String],
         required: true,
     },
-    
-    // --- МЕТАДАННЫЕ ДЛЯ КАТАЛОГИЗАЦИИ И ПОИСКА ---
-    rating: { // Уровень сложности задачи (в стиле Lichess/Chess.com)
+    rating: {
         type: Number,
-        default: 1500
+        required: true,
+        index: true,
     },
-    themes: { // Тактические темы задачи
+    themes: {
         type: [String],
-        // ['fork', 'pin', 'skewer', 'discovered_attack', 'mating_net']
         default: [],
-        index: true, // Индексируем для быстрого поиска по темам
+        index: true,
     },
-    pgn: { // Полный PGN партии, из которой взята задача (опционально)
-        type: String,
+    popularity: {
+        type: Number,
     },
-    
-    // --- ИСТОЧНИК И АВТОРСТВО ---
-    source: { // Откуда взята задача (напр., "Партия Карпов-Каспаров, 1985")
-        type: String,
+    nbPlays: {
+        type: Number,
     },
-    createdBy: { // Пользователь (админ или тренер), который добавил задачу
-        type: Schema.Types.ObjectId,
-        ref: 'TestUser',
-        required: true,
-    },
-}, { timestamps: true });
+}, {
+    _id: false,
+    versionKey: false
+});
 
+// 2. СОЗДАНИЕ МОДЕЛИ (ЭТА СТРОКА, СКОРЕЕ ВСЕГО, ОТСУТСТВОВАЛА)
+// Mongoose берет название 'Puzzle', делает его 'puzzles' и ищет такую коллекцию в БД.
+const Puzzle = mongoose.model('Puzzle', PuzzleSchema);
 
-// Отдельная модель для коллекций пазлов. Ваша была идеальной.
-const PuzzleCollectionSchema = new Schema({
-    title: {
-        type: String,
-        required: true,
-    },
-    description: {
-        type: String,
-    },
-    puzzles: [{ // Массив ссылок на задачи
-        type: Schema.Types.ObjectId,
-        ref: 'Puzzle',
-    }],
-    createdBy: {
-        type: Schema.Types.ObjectId,
-        ref: 'TestUser', // Может быть создан как тренером, так и админом
-        required: true,
-    },
-}, { timestamps: true });
-
-module.exports = {
-    Puzzle: mongoose.model('Puzzle', PuzzleSchema),
-    PuzzleCollection: mongoose.model('PuzzleCollection', PuzzleCollectionSchema),
-};
+// 3. ЭКСПОРТ ГОТОВОЙ МОДЕЛИ (ЭТА СТРОКА ТОЖЕ МОГЛА БЫТЬ НЕВЕРНОЙ)
+// Мы экспортируем саму модель, а не схему.
+module.exports = Puzzle;

@@ -1,6 +1,6 @@
 // controllers/chessDB.controller.js
 
-const { Chess } = require('chess.js'); // <--- ДОБАВЬТЕ ЭТУ СТРОКУ
+// const { Chess } = require('chess.js'); // <--- ДОБАВЬТЕ ЭТУ СТРОКУ
 
 // Импортируем обе модели
 const Game = require('../models/Game');

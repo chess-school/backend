@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
-const dotenv = require('dotenv');
+// .env — до подключения модулей: часть из них читает окружение при загрузке (CORS_ORIGINS, Stripe)
+require('dotenv').config();
 const cors = require('cors');
 const connectDB = require('./config/db');
 const i18nextMiddleware = require('./config/i18n');
@@ -11,7 +12,6 @@ const { corsOptions } = require('./config/cors');
 const rateLimit = require('express-rate-limit');
 const dns = require('dns');
 dns.setServers(['8.8.8.8']);
-dotenv.config();
 connectDB();
 
 const app = express();

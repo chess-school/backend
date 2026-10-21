@@ -1,43 +1,68 @@
 // Импортируем модель, чтобы контроллер мог работать с базой данных
+const mongoose = require('mongoose');
 const Puzzle = require('../models/Puzzle');
 
-// @desc    Получить случайную задачу, с возможностью фильтрации по рейтингу
-// @route   GET /api/puzzles/random
-// @access  Public
+// Задача Lichess (нет source) или задача опубликованной оцифрованной книги
+const VISIBLE = { $or: [{ 'source.kind': { $exists: false } }, { 'source.published': true }] };
+
+/** Ответ клиенту: у книжной задачи нет хода соперника перед решением */
+const toDto = (puzzle) => ({
+    _id: puzzle._id,
+    fen: puzzle.fen,
+    moves: puzzle.moves,
+    rating: puzzle.rating,
+    themes: puzzle.themes || [],
+    popularity: puzzle.popularity,
+    nbPlays: puzzle.nbPlays,
+    // true (Lichess): moves[0] — ход соперника, решение начинается с moves[1]
+    startsWithOpponentMove: !(puzzle.source && puzzle.source.kind === 'book'),
+    source: puzzle.source && puzzle.source.kind === 'book'
+        ? {
+            kind: 'book',
+            book: puzzle.source.book,
+            bookTitle: puzzle.source.bookTitle,
+            exerciseNumber: puzzle.source.exerciseNumber,
+            title: puzzle.source.title,
+            sideToMove: puzzle.source.sideToMove,
+        }
+        : { kind: 'lichess' },
+});
+
+// @desc    Случайная задача. Фильтры: minRating/maxRating, source (lichess — по умолчанию | book | all), bookId, exclude
+// @route   GET /api/v2/puzzles/random
+// @access  Private
 const getRandomPuzzle = async (req, res) => {
-    try {
-        const { minRating, maxRating } = req.query;
+    // По умолчанию — только Lichess: старые клиенты (рейтинг, выживание) ждут moves[0] = ход соперника
+    const { minRating, maxRating, source = 'lichess', bookId, exclude, theme } = req.query;
 
-        // 1. Создаем объект фильтра для MongoDB
-        const filter = {};
-        if (minRating && maxRating) {
-            // Убедимся, что параметры являются числами
-            const min = parseInt(minRating);
-            const max = parseInt(maxRating);
-            if (!isNaN(min) && !isNaN(max)) {
-                filter.rating = { $gte: min, $lte: max };
-            }
-        }
+    // Задачи конкретной книги — всегда книжные, даже без явного source=book
+    const kind = bookId ? 'book' : source;
+    const filter = { $and: [VISIBLE] };
+    if (kind === 'lichess') filter.$and.push({ 'source.kind': { $exists: false } });
+    if (kind === 'book') filter.$and.push({ 'source.kind': 'book' });
+    if (bookId) filter.$and.push({ 'source.book': new mongoose.Types.ObjectId(bookId) });
+    if (theme) filter.$and.push({ themes: theme });
 
-        // 2. Считаем количество документов, подходящих под фильтр
-        const count = await Puzzle.countDocuments(filter);
-
-        if (count === 0) {
-            return res.status(404).json({ success: false, message: 'Задачи с указанными параметрами не найдены' });
-        }
-
-        // 3. Генерируем случайный индекс для выборки
-        const random = Math.floor(Math.random() * count);
-
-        // 4. Находим одну случайную задачу, используя .skip() для эффективности
-        const puzzle = await Puzzle.findOne(filter).skip(random);
-
-        res.status(200).json({ success: true, data: puzzle });
-
-    } catch (err) {
-        console.error("Ошибка в контроллере getRandomPuzzle:", err.message);
-        res.status(500).json({ success: false, message: 'Ошибка сервера' });
+    // Рейтинговое окно — свойство задач Lichess. У книжных задач рейтинга Lichess нет (у всех 1500),
+    // поэтому в режимах «Рейтинг»/«Выживание» с источником «книги» окно не применяется,
+    // а для «все» — применяется только к задачам Lichess, книжные идут без него
+    if ((minRating !== undefined || maxRating !== undefined) && kind !== 'book') {
+        const rating = {};
+        if (minRating !== undefined) rating.$gte = minRating;
+        if (maxRating !== undefined) rating.$lte = maxRating;
+        filter.$and.push(kind === 'all'
+            ? { $or: [{ 'source.kind': 'book' }, { rating }] }
+            : { rating });
     }
+    // Не показывать подряд ту же задачу
+    if (exclude) filter._id = { $ne: exclude };
+
+    const count = await Puzzle.countDocuments(filter);
+    if (count === 0) {
+        return res.status(404).json({ msg: 'No puzzles match the filters.', code: 'PUZZLE_NOT_FOUND' });
+    }
+    const puzzle = await Puzzle.findOne(filter).skip(Math.floor(Math.random() * count)).lean();
+    res.status(200).json({ success: true, data: toDto(puzzle), total: count });
 };
 
 // Экспортируем нашу функцию, чтобы ее можно было использовать в файле маршрутов

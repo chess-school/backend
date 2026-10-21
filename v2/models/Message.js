@@ -10,7 +10,7 @@ const MessageSchema = new Schema({
     },
     sender: { // Кто отправил
         type: Schema.Types.ObjectId,
-        ref: 'User',
+        ref: 'TestUser',
         required: true,
     },
     text: { // Текст сообщения

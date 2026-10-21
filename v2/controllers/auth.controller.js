@@ -36,7 +36,7 @@ const register = async (req, res) => {
         lastName,
         email: email.toLowerCase(),
         password,
-        roles: ['COACH', 'ADMIN', 'USER'],
+        roles: ['USER'],
         verificationToken,
         avatarUrl: defaultAvatarUrl, 
     });

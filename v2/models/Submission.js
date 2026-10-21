@@ -11,6 +11,15 @@ const SubmissionSchema = new Schema({
     // Содержимое ответа
     contentText: { type: String },
     contentFileUrl: { type: String }, // Ссылка на загруженный файл (скриншот, PGN-файл)
+    // Вложение (скриншот позиции), хранится в документе; data не выбирается по умолчанию —
+    // списки сдач не тянут мегабайты картинок. Отдаётся через GET /submissions/:id/attachment
+    attachment: {
+        data: { type: Buffer, select: false },
+        contentType: { type: String },
+        size: { type: Number },
+        filename: { type: String },
+    },
+    submittedAt: { type: Date, default: Date.now }, // время последней (пере)сдачи
 
     // Статус и оценка
     status: {
@@ -27,5 +36,7 @@ const SubmissionSchema = new Schema({
 
 // Уникальный индекс, чтобы студент не мог сдать одно ДЗ дважды
 SubmissionSchema.index({ assignment: 1, student: 1 }, { unique: true });
+// Успеваемость студента: все его сдачи по статусам
+SubmissionSchema.index({ student: 1, status: 1 });
 
 module.exports = mongoose.model('Submission', SubmissionSchema);

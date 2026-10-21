@@ -15,40 +15,57 @@ const enrollInCourse = async (req, res) => {
     const { courseId } = req.params;
     const studentId = req.user.id;
 
-    // 1. Проверяем, существует ли курс и опубликован ли он
+    // 1. Проверяем, существует ли курс и опубликован ли он (некорректный id -> 400 в errorHandlerV2)
     const course = await Course.findOne({ _id: courseId, status: 'published' });
     if (!course) {
-        return res.status(404).json({ msg: 'Published course not found.' });
+        return res.status(404).json({ msg: 'Published course not found.', code: 'COURSE_NOT_FOUND' });
     }
     
     // 2. Проверяем, не записан ли студент уже на этот курс
     const existingContract = await TrainingContract.findOne({ student: studentId, course: courseId });
     if (existingContract) {
-        return res.status(400).json({ msg: 'You are already enrolled in this course.' });
+        return res.status(409).json({ msg: 'You are already enrolled in this course.', code: 'ALREADY_ENROLLED' });
     }
 
     // 3. Находим основного тренера курса (например, первого в списке авторов)
     const primaryCoach = await Coach.findById(course.authors[0]);
     if (!primaryCoach) {
-        return res.status(404).json({ msg: 'Could not find a coach for this course.' });
+        return res.status(404).json({ msg: 'Could not find a coach for this course.', code: 'COACH_NOT_FOUND' });
     }
+    if (String(primaryCoach.user) === req.user.id) {
+        return res.status(422).json({ msg: 'You cannot enroll in your own course.', code: 'SELF_ENROLLMENT' });
+    }
+    const isFree = !course.price || course.price.amount === 0;
 
     // 4. Создаем новый контракт
     const newContract = new TrainingContract({
         student: studentId,
         course: courseId,
         coach: primaryCoach._id, // Привязываем к основному тренеру
-        status: 'pending_payment', // Статус по умолчанию - ожидает оплаты
+        // Бесплатный курс оплачивать нечем: без этого запись навсегда застревала в pending_payment
+        status: isFree ? 'active' : 'pending_payment',
+        startDate: isFree ? new Date() : undefined,
         priceAtPurchase: course.price, // Фиксируем цену на момент покупки
         // packageSnapshot можно будет заполнить из данных курса
     });
 
-    await newContract.save();
+    try {
+        await newContract.save();
+    } catch (e) {
+        // Два одновременных запроса: второй упирается в уникальный индекс (student, course)
+        if (e.code === 11000) {
+            return res.status(409).json({ msg: 'You are already enrolled in this course.', code: 'ALREADY_ENROLLED' });
+        }
+        throw e;
+    }
 
     // В будущем здесь можно инициировать процесс оплаты
     // await createPaymentSession(newContract._id);
 
-    res.status(201).json({ msg: 'Successfully enrolled. Awaiting payment.', contract: newContract });
+    res.status(201).json({
+        msg: isFree ? 'Successfully enrolled.' : 'Successfully enrolled. Awaiting payment.',
+        contract: newContract,
+    });
 };
 
 
@@ -89,7 +106,7 @@ const getMyStudents = async (req, res) => {
     // 1. Находим профиль тренера
     const coachProfile = await Coach.findOne({ user: req.user.id }).select('_id');
     if (!coachProfile) {
-        return res.status(404).json({ msg: 'Coach profile not found.' });
+        return res.status(404).json({ msg: 'Coach profile not found.', code: 'COACH_PROFILE_REQUIRED' });
     }
     
     // 2. Находим все контракты, где этот тренер является куратором

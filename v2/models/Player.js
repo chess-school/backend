@@ -44,7 +44,6 @@ const PlayerSchema = new Schema({
 
 }, { timestamps: true });
 
-// Индекс для быстрого поиска игрока по ID пользователя
-PlayerSchema.index({ user: 1 });
+// Индекс по user создаёт unique: true выше (отдельный index({ user: 1 }) был дублем)
 
 module.exports = mongoose.model('PlayerV2', PlayerSchema);

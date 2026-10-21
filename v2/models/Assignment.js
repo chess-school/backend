@@ -21,9 +21,16 @@ const AssignmentSchema = new Schema({
     
     // Опционально: может быть привязано к конкретному уроку в курсе
     lesson: { type: Schema.Types.ObjectId },
+
+    // Занятие в расписании, к которому задано ДЗ (не больше одного ДЗ на занятие)
+    schedule: { type: Schema.Types.ObjectId, ref: 'ScheduleV2' },
     
     dueDate: { type: Date }, // Срок сдачи
 
 }, { timestamps: true });
+
+AssignmentSchema.index({ author: 1, createdAt: -1 }); // ДЗ тренера
+AssignmentSchema.index({ 'context.type': 1, 'context.refId': 1 }); // ДЗ студента / группы / курса
+AssignmentSchema.index({ schedule: 1 }, { unique: true, partialFilterExpression: { schedule: { $type: 'objectId' } } });
 
 module.exports = mongoose.model('Assignment', AssignmentSchema);

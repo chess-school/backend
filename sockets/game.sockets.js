@@ -1,31 +1,19 @@
 const { Server } = require('socket.io');
+const { isAllowedOrigin } = require('../config/cors');
 
+// Общий socket.io-сервер (CORS как у Express); namespaces подключаются в server.js
 const initializeSocket = (server) => {
     const io = new Server(server, {
+        // Те же источники, что у Express (config/cors.js), включая превью Vercel
         cors: {
-            origin: ['http://localhost:3002', 'http://localhost:3001', 'http://localhost:5173'],
+            origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
             methods: ['GET', 'POST'],
             credentials: true
         }
     });
 
-    io.on('connection', (socket) => {
-        console.log(`Игрок подключился: ${socket.id}`);
-
-        socket.on('move', (data) => {
-            console.log('Ход:', data);
-            io.to(data.gameId).emit('move', data);
-        });
-
-        socket.on('joinGame', ({ gameId, playerId }) => {
-            socket.join(gameId);
-            console.log(`Игрок ${playerId} присоединился к игре ${gameId}`);
-        });
-
-        socket.on('disconnect', () => {
-            console.log('Игрок отключился:', socket.id);
-        });
-    });
+    // Обработчиков в корневом namespace нет: партии — /play (sockets/play.sockets.js), чат — /chat.
+    // Прежние 'move'/'joinGame' пересылали ходы без проверки — удалены.
 
     return io;
 };

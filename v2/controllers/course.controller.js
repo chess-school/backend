@@ -60,9 +60,19 @@ const getMyCourses = async (req, res) => {
  * @route   PUT /api/v2/courses/:courseId
  * @access  Private (role: COACH)
  */
+// Поля, которые автор может менять через PUT. authors и status сюда не входят:
+// соавторы не должны исчезать из-за PUT, а статус меняется через PATCH /:courseId/status
+const UPDATABLE_COURSE_FIELDS = ['title', 'description', 'thumbnailUrl', 'modules', 'price', 'level', 'tags', 'language', 'isSchoolCourse'];
+
 const updateCourse = async (req, res) => {
     const { courseId } = req.params;
-    const updateData = req.body; // Получаем все поля для обновления
+    const updateData = {};
+    for (const field of UPDATABLE_COURSE_FIELDS) {
+        if (req.body[field] !== undefined) updateData[field] = req.body[field];
+    }
+    if (Object.keys(updateData).length === 0) {
+        return res.status(400).json({ msg: `Nothing to update. Allowed fields: ${UPDATABLE_COURSE_FIELDS.join(', ')}`, code: 'EMPTY_UPDATE' });
+    }
 
     if (!mongoose.Types.ObjectId.isValid(courseId)) {
         return res.status(400).json({ msg: 'Invalid course ID format' });
@@ -75,12 +85,13 @@ const updateCourse = async (req, res) => {
     }
 
     const coachProfile = await Coach.findOne({ user: req.user.id }).select('_id');
-    if (!course.authors.includes(coachProfile._id)) {
+    if (!coachProfile || !course.authors.some((a) => String(a) === String(coachProfile._id))) {
         return res.status(403).json({ msg: 'Forbidden: You are not an author of this course.' });
     }
 
     // Обновляем курс данными из запроса
-    const updatedCourse = await Course.findByIdAndUpdate(courseId, { $set: updateData }, { new: true });
+    // runValidators: enum уровня/языка и минимальная цена проверяются и при обновлении
+    const updatedCourse = await Course.findByIdAndUpdate(courseId, { $set: updateData }, { new: true, runValidators: true });
 
     res.json(updatedCourse);
 };
@@ -100,6 +111,9 @@ const updateCourseStatus = async (req, res) => {
     }
 
     const coachProfile = await Coach.findOne({ user: req.user.id }).select('_id');
+    if (!coachProfile) {
+        return res.status(403).json({ msg: 'You must have a coach profile to manage courses.', code: 'COACH_PROFILE_REQUIRED' });
+    }
 
     const course = await Course.findOneAndUpdate(
         { _id: courseId, authors: coachProfile._id },

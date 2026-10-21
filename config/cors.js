@@ -1,9 +1,16 @@
-// Разрешённые источники — общие для Express и socket.io
+// Разрешённые источники — общие для Express и socket.io.
+// На сервере боевой домен фронтенда задаётся в CORS_ORIGINS (через запятую, без / в конце)
+const fromEnv = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+
 const whitelist = [
     'http://localhost:3002',
     'http://localhost:3001',
     'http://localhost:5173',
-].filter(Boolean);
+    ...fromEnv,
+];
 
 const vercelPreviewRegex = /^https:\/\/new-front-u2qi-[a-z0-9]+-nikitas-projects-27f00a22\.vercel\.app$/;
 

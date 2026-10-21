@@ -3,7 +3,7 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const TrainingContract = require('../models/TrainingContract');
 const Payment = require('../models/Payment');
-const Course = require('../models/Course'); // Понадобится для populate
+require('../models/Course'); // регистрирует модель для populate('course')
 
 /**
  * @desc    Создание Stripe Checkout сессии для оплаты контракта.
@@ -89,26 +89,53 @@ const handleStripeWebhook = async (req, res) => {
 
         try {
             // 1. Получаем наши ID из метаданных, которые мы отправили ранее
-            const { contractId, userId, courseId } = session.metadata;
+            const { contractId, userId } = session.metadata || {};
+            const contract = contractId ? await TrainingContract.findById(contractId) : null;
+            if (!contract) {
+                // Повторять бессмысленно — отвечаем 200, чтобы Stripe не слал событие снова
+                console.warn(`Contract with ID ${contractId} not found.`);
+                return res.status(200).send();
+            }
 
-            // 2. Обновляем статус контракта на 'active'
-            const contract = await TrainingContract.findByIdAndUpdate(contractId, { status: 'active' });
+            // 2. Платёж записываем идемпотентно: Stripe может доставить одно событие несколько раз,
+            //    а create() падал на уникальном gatewayTransactionId -> 500 -> бесконечные повторы
+            const paidAmount = session.amount_total;
+            const paidCurrency = (session.currency || '').toUpperCase();
+            try {
+                await Payment.updateOne(
+                    { gatewayTransactionId: session.payment_intent || session.id },
+                    {
+                        $setOnInsert: {
+                            user: userId || contract.student,
+                            contract: contract._id,
+                            amount: paidAmount,
+                            currency: paidCurrency,
+                            paymentGateway: 'Stripe',
+                            status: 'succeeded',
+                            metadata: { checkoutSessionId: session.id },
+                        },
+                    },
+                    { upsert: true, runValidators: true },
+                );
+            } catch (e) {
+                // По этому контракту уже есть платёж с другим ID транзакции (Payment.contract уникален)
+                if (e.code !== 11000) throw e;
+                console.warn(`Contract ${contractId} already has a payment; duplicate checkout ${session.id} ignored.`);
+                return res.status(200).send();
+            }
 
-            if (contract) {
-                 // 3. Создаем запись о платеже в нашей базе данных
-                await Payment.create({
-                    user: userId,
-                    contract: contractId,
-                    amount: session.amount_total,
-                    currency: session.currency.toUpperCase(),
-                    paymentGateway: 'Stripe',
-                    gatewayTransactionId: session.payment_intent,
-                    status: 'succeeded'
-                });
-                
-                console.log(`Contract ${contractId} activated.`);
+            // 3. Активируем запись, только если сумма и валюта совпали и запись ещё ждёт оплаты:
+            //    отменённый/возвращённый контракт не должен «воскреснуть» от позднего вебхука
+            const expected = contract.priceAtPurchase || {};
+            const amountMatches = paidAmount >= expected.amount && paidCurrency === String(expected.currency).toUpperCase();
+            if (!amountMatches) {
+                console.error(`Contract ${contractId}: paid ${paidAmount} ${paidCurrency}, expected ${expected.amount} ${expected.currency} — not activated.`);
             } else {
-                 console.warn(`Contract with ID ${contractId} not found.`);
+                const activated = await TrainingContract.updateOne(
+                    { _id: contract._id, status: { $in: ['pending_payment', 'pending_approval'] } },
+                    { $set: { status: 'active', startDate: contract.startDate || new Date() } },
+                );
+                if (activated.modifiedCount) console.log(`Contract ${contractId} activated.`);
             }
 
         } catch (dbError) {

@@ -76,8 +76,17 @@ const CourseSchema = new Schema({
         enum: ['beginner', 'intermediate', 'advanced', 'expert'],
     },
     tags: [String], // Теги для поиска: ['sicilian_defense', 'middlegame', ...]
+    // Язык курса: createCourse и фильтр каталога ?language= уже использовали поле, но его не было в схеме
+    language: {
+        type: String,
+        enum: ['en', 'uk', 'pl'],
+        default: 'en',
+    },
 
 }, { timestamps: true });
+
+// Курсы тренера (кабинет тренера, проверка авторства при записи студента)
+CourseSchema.index({ authors: 1 });
 
 
 // Индекс для текстового поиска по названию и описанию

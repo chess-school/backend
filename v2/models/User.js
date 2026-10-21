@@ -4,6 +4,14 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const { randomUUID } = require('crypto');
 
+// Рейтинг в одной категории: Glicko-2 (рейтинг, отклонение, волатильность) и число рейтинговых партий
+const PerfSchema = new mongoose.Schema({
+    rating: { type: Number, default: 1500 },
+    rd: { type: Number, default: 350 },
+    vol: { type: Number, default: 0.06 },
+    games: { type: Number, default: 0 },
+}, { _id: false });
+
 // Я оставляю эту модель "легкой", как мы и решили. 
 // Все связи (студенты, тренер, профиль тренера) УБРАНЫ.
 const TestUserSchema = new mongoose.Schema({
@@ -37,6 +45,14 @@ const TestUserSchema = new mongoose.Schema({
         type: String,
         required: true,
         unique: true,
+        trim: true,
+        lowercase: true, // регистрация и так приводит к нижнему регистру — фиксируем на уровне схемы
+    },
+    // Контактный телефон в формате E.164 (+380501234567); необязателен
+    phone: {
+        type: String,
+        trim: true,
+        match: [/^\+[1-9]\d{7,14}$/, 'Phone must be in international format, e.g. +380501234567'],
     },
     emailVerified: {
         type: Boolean, 
@@ -62,9 +78,20 @@ const TestUserSchema = new mongoose.Schema({
         default: 0,
     },
 
-}, { 
+    // Рейтинги онлайн-партий (Glicko-2, v2/utils/ratingCalculator.js) — по категориям контроля времени
+    ratings: {
+        bullet: { type: PerfSchema, default: () => ({}) },
+        blitz: { type: PerfSchema, default: () => ({}) },
+        rapid: { type: PerfSchema, default: () => ({}) },
+        classical: { type: PerfSchema, default: () => ({}) },
+    },
+
+}, {
     timestamps: true // Заменяем registrationDate на createdAt и updatedAt
 });
+
+// Поиск студентов по имени (список студентов тренера/админа)
+TestUserSchema.index({ lastName: 1, firstName: 1 });
 
 // Хуки оставляем, они идеальны
 TestUserSchema.pre('save', async function (next) {

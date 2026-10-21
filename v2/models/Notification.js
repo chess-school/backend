@@ -39,6 +39,8 @@ const NotificationSchema = new Schema({
             
             // Связанные с оплатами и курсами
             'CONTRACT_APPROVED',        // Ваша заявка на курс одобрена
+            'COACH_REQUEST',            // Новая заявка ученика (уведомление для тренера)
+            'COACH_REQUEST_DECIDED',    // Тренер одобрил/отклонил заявку (для ученика)
             'PAYMENT_SUCCESSFUL',       // Платеж прошел успешно
             'PAYMENT_FAILED',           // Ошибка платежа
             

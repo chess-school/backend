@@ -97,14 +97,19 @@ const getMyCoachProfile = async (req, res) => {
  * @access  Public
  */
 const getCoaches = async (req, res) => {
-    const { uuid, page = 1, limit = 10 } = req.query;
+    const { uuid, page = 1, limit = 10, q } = req.query;
     const lang = req.language || 'en';
 
     const query = { isVerified: true };
     if (uuid) {
         const user = await User.findOne({ uuid }).select('_id');
-        if (!user) return res.json(uuid ? null : { data: [] });
+        if (!user) return res.json(null);
         query.user = user._id;
+    } else if (q && q.trim()) {
+        // Поиск по имени: «anna», «anna kow», «kowalska»
+        const words = q.trim().split(/\s+/).slice(0, 3).map((w) => new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+        const users = await User.find({ $and: words.map((re) => ({ $or: [{ firstName: re }, { lastName: re }] })) }).select('_id').limit(200).lean();
+        query.user = { $in: users.map((u) => u._id) };
     }
     
     const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);

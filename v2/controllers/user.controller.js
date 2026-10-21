@@ -22,7 +22,7 @@ const getMyProfile = async (req, res) => {
  * @access  Private
  */
 const updateMyProfile = async (req, res) => {
-    const { firstName, lastName, currentPassword, newPassword } = req.body;
+    const { firstName, lastName, phone, currentPassword, newPassword } = req.body;
     const userId = req.user.id;
     const { t } = req;
 
@@ -33,6 +33,8 @@ const updateMyProfile = async (req, res) => {
 
     if (firstName) user.firstName = firstName;
     if (lastName) user.lastName = lastName;
+    // phone: строка в формате E.164 (уже провалидирована в роуте) или null/'' — удалить
+    if (phone !== undefined) user.phone = phone || undefined;
     
     if (newPassword) {
         if (!currentPassword) {

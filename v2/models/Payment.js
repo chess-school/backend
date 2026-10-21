@@ -68,6 +68,6 @@ const PaymentSchema = new Schema({
 PaymentSchema.index({ user: 1 }); // Найти все платежи пользователя
 PaymentSchema.index({ contract: 1 }, { unique: true }); // Один контракт может быть оплачен только одним успешным платежом. 
                                                          // Можно убрать unique, если будут рассрочки. Для MVP - оставляем.
-PaymentSchema.index({ gatewayTransactionId: 1 }); // Быстрый поиск по ID из платежной системы
+// Индекс по gatewayTransactionId создаёт unique: true в схеме (отдельный index был дублем)
 
 module.exports = mongoose.model('Payment', PaymentSchema);

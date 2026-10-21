@@ -28,7 +28,7 @@ const CoachSchema = new Schema({
     // --- КЛЮЧЕВАЯ СВЯЗЬ ---
     user: {
         type: Schema.Types.ObjectId,
-        ref: 'User', // Теперь наша основная модель 'User' из v2
+        ref: 'TestUser', // модель пользователя v2 (v2/models/User.js регистрирует её как 'TestUser')
         required: true,
         unique: true,
     },
@@ -74,6 +74,6 @@ const CoachSchema = new Schema({
 }, { timestamps: true });
 
 
-CoachSchema.index({ user: 1 });
+// Индекс по user уже создаёт unique: true выше — отдельный CoachSchema.index({ user: 1 }) был дублем
 
 module.exports = mongoose.model('Coach', CoachSchema);

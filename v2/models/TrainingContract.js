@@ -74,5 +74,6 @@ const TrainingContractSchema = new Schema({
 TrainingContractSchema.index({ student: 1, course: 1 }, { unique: true }); // Студент не может дважды купить один и тот же курс
 TrainingContractSchema.index({ coach: 1, status: 1 }); // Найти всех активных студентов тренера
 TrainingContractSchema.index({ group: 1 }); // Найти всех участников группы (по контрактам)
+TrainingContractSchema.index({ course: 1, status: 1 }); // Студенты курса по статусу
 
 module.exports = mongoose.model('TrainingContract', TrainingContractSchema);

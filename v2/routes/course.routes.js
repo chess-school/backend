@@ -21,16 +21,8 @@ router.get('/', courseController.getPublicCourses);
 //          ПРИВАТНЫЕ РОУТЫ ДЛЯ УПРАВЛЕНИЯ КУРСАМИ
 // =================================================================
 
-/**
- * @route   GET /api/v2/coaches/me/courses
- * @desc    Получить список курсов ТЕКУЩЕГО тренера
- */
-router.get(
-    '/coaches/me/courses',
-    authMiddleware,
-    roleMiddleware(['COACH']),
-    courseController.getMyCourses
-);
+// Список своих курсов: GET /api/v2/coaches/me/courses — объявлен в coach.routes.js
+// (здесь он оказывался по адресу /api/v2/courses/coaches/me/courses).
 
 /**
  * @route   POST /api/v2/courses

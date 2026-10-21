@@ -1,13 +1,18 @@
 // v2/routes/group.routes.js
 
 const express = require('express');
+const { body, param } = require('express-validator');
 const router = express.Router();
 const withErrorHandling = require('../utils/withErrorHandling');
 const authMiddleware = require('../middleware/authV2.middleware');
 const roleMiddleware = require('../middleware/roleV2.middleware');
 const groupController = require('../controllers/group.controller');
-const validateRequest = require('../middleware/validateRequest');
+const validate = require('../middleware/validate');
 
+const groupIdParam = param('groupId').isMongoId().withMessage('groupId must be a valid id');
+
+// Список своих групп: GET /api/v2/coaches/me/groups — объявлен в coach.routes.js
+// (здесь он оказывался по адресу /api/v2/groups/coaches/me/groups).
 
 // =================================================================
 //          РОУТЫ ДЛЯ УПРАВЛЕНИЯ ГРУППАМИ (ДЛЯ ТРЕНЕРОВ)
@@ -22,31 +27,23 @@ router.post(
     '/',
     authMiddleware,
     roleMiddleware(['COACH']),
-    validateRequest('name'), // Название группы обязательно
+    validate([
+        body('name').isString().withMessage('name is required').bail().trim()
+            .isLength({ min: 1, max: 100 }).withMessage('name must be 1–100 characters'),
+        body('description').optional().isString().trim().isLength({ max: 2000 }).withMessage('description must be up to 2000 characters'),
+    ]),
     groupController.createGroup
 );
 
 /**
- * @route   GET /api/v2/coaches/me/groups
- * @desc    Получить список всех групп, созданных текущим тренером
- * @access  Private (role: COACH)
- */
-router.get(
-    '/coaches/me/groups', // Этот роут логически связан с "моими" данными тренера
-    authMiddleware,
-    roleMiddleware(['COACH']),
-    groupController.getMyGroups
-);
-
-/**
  * @route   GET /api/v2/groups/:groupId
- * @desc    Получить детальную информацию о группе (для тренера или участника)
+ * @desc    Получить детальную информацию о группе (для тренера, участника или ADMIN)
  * @access  Private
  */
 router.get(
     '/:groupId',
-    authMiddleware, // Доступ есть у любого авторизованного пользователя...
-    // ...а детальная проверка (тренер я или участник) происходит внутри контроллера
+    authMiddleware,
+    validate([groupIdParam]),
     groupController.getGroupById
 );
 
@@ -63,7 +60,7 @@ router.post(
     '/:groupId/members',
     authMiddleware,
     roleMiddleware(['COACH']),
-    validateRequest('userUuid'), // Требуем передать uuid студента в теле запроса
+    validate([groupIdParam, body('userUuid').isUUID().withMessage('userUuid must be a valid UUID')]),
     groupController.addMemberToGroup
 );
 
@@ -76,6 +73,7 @@ router.delete(
     '/:groupId/members/:userUuid',
     authMiddleware,
     roleMiddleware(['COACH']),
+    validate([groupIdParam, param('userUuid').isUUID().withMessage('userUuid must be a valid UUID')]),
     groupController.removeMemberFromGroup
 );
 

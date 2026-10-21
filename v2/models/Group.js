@@ -42,5 +42,7 @@ const GroupSchema = new Schema({
 
 // Создаем индекс для быстрого поиска всех групп конкретного тренера
 GroupSchema.index({ coach: 1 });
+// Поиск групп, в которых состоит студент (расписание, карточка студента)
+GroupSchema.index({ members: 1 });
 
 module.exports = mongoose.model('Group', GroupSchema);

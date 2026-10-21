@@ -10,7 +10,7 @@ const ConversationSchema = new Schema({
     },
     members: [{ // Массив участников
         type: Schema.Types.ObjectId,
-        ref: 'User',
+        ref: 'TestUser',
         required: true,
     }],
     
@@ -23,7 +23,7 @@ const ConversationSchema = new Schema({
     // Последнее сообщение (для превью в списке чатов)
     lastMessage: {
         text: String,
-        sender: { type: Schema.Types.ObjectId, ref: 'User' },
+        sender: { type: Schema.Types.ObjectId, ref: 'TestUser' },
         timestamp: Date,
     }
 }, { timestamps: true });

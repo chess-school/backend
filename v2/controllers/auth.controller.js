@@ -47,7 +47,8 @@ const register = async (req, res) => {
 
     await sendVerificationEmailV2(user.email, verificationToken, req.t);
 
-    res.status(201).json({ msg: req.t('api.registrationSuccess') });
+    // email возвращаем, чтобы фронт показал страницу "проверьте почту" и опрашивал статус
+    res.status(201).json({ msg: req.t('api.registrationSuccess'), email: user.email });
 };
 
 /**
@@ -131,11 +132,11 @@ const resendVerificationEmail = async (req, res) => {
         return res.status(400).json({ msg: t('api.auth.emailAlreadyVerified') });
     }
 
-    const newVerificationToken = randomBytes.randomBytes(32).toString('hex');
+    const newVerificationToken = randomBytes(32).toString('hex');
     user.verificationToken = newVerificationToken;
     await user.save();
 
-    await sendVerificationEmail(user.email, newVerificationToken, t);
+    await sendVerificationEmailV2(user.email, newVerificationToken, t);
 
     res.json({ msg: t('api.auth.verificationResentSuccess') });
 };
@@ -148,20 +149,17 @@ const resendVerificationEmail = async (req, res) => {
  * @access  Public
  */
 const checkVerificationStatus = async (req, res) => {
-    const { token } = req.body;
-    const { t } = req;
+    // Вкладка "проверьте почту" опрашивает статус по email (токен лежит только в письме)
+    const email = req.query.email;
 
-    if (!token) {
-        return res.status(400).json({ msg: t('api.auth.tokenRequired') });
+    if (!email) {
+        return res.status(400).json({ emailVerified: false });
     }
-    
-    // Ищем пользователя по токену в нашей V2 модели
-    const user = await User.findOne({ verificationToken: token }).select('emailVerified');
+
+    const user = await User.findOne({ email: String(email).toLowerCase() }).select('emailVerified');
 
     if (!user) {
-        // Мы не знаем, неверный токен или пользователь уже верифицировался и токен удален.
-        // Поэтому возвращаем `emailVerified: false`, фронтенд должен это обработать (например, прекратить опрос).
-        return res.status(404).json({ emailVerified: false, msg: t('api.auth.invalidTokenOrAlreadyVerified') });
+        return res.status(404).json({ emailVerified: false });
     }
 
     res.json({ emailVerified: user.emailVerified });

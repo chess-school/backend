@@ -106,6 +106,12 @@ const getHomeworkScreenshot = async (req, res) => {
         return res.status(404).send('Not found');
     }
 
+    const isOwnerStudent = homework.student && homework.student.toString() === req.user.id;
+    const isOwnerCoach = homework.coach && homework.coach.toString() === req.user.id;
+    if (!isOwnerStudent && !isOwnerCoach) {
+        return res.status(403).json({ msg: 'Access denied.' });
+    }
+
     res.set('Content-Type', homework.screenshot.contentType);
     res.send(homework.screenshot.data);
 };

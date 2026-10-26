@@ -30,11 +30,15 @@ const eventFields = (required) => [
 router.post(
     '/',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    require('../middleware/resolveClubV2.middleware'),
+    roleMiddleware(['COACH', 'ADMIN']),
     validate([
         ...eventFields(true),
         body('eventType').isIn(['individual', 'group']).withMessage('eventType must be "individual" or "group"'),
         body('contextId').isMongoId().withMessage('contextId must be a valid id'),
+        body('notify').optional().isBoolean().withMessage('notify must be a boolean').toBoolean(),
+        body('message').optional({ values: 'falsy' }).isString().isLength({ max: 2000 }).withMessage('message must be at most 2000 chars'),
+        body('personalMessages').optional().isObject().withMessage('personalMessages must be an object'),
     ]),
     scheduleController.createScheduleEvent
 );
@@ -48,6 +52,7 @@ router.post(
 router.get(
     '/',
     authMiddleware,
+    require('../middleware/resolveClubV2.middleware'),
     validate([
         query(['startDate', 'endDate']).optional().isISO8601().withMessage('must be an ISO 8601 date'),
     ]),
@@ -63,7 +68,7 @@ router.get(
 router.put(
     '/:eventId',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    roleMiddleware(['COACH', 'ADMIN']),
     validate([
         eventIdParam,
         ...eventFields(false),
@@ -80,7 +85,7 @@ router.put(
 router.delete(
     '/:eventId',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    roleMiddleware(['COACH', 'ADMIN']),
     validate([eventIdParam]),
     scheduleController.deleteScheduleEvent
 );

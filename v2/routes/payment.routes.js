@@ -16,6 +16,7 @@ const validateRequest = require('../middleware/validateRequest');
 router.post(
     '/create-checkout-session',
     authMiddleware,
+    require('../middleware/resolveClubV2.middleware'),
     validateRequest('contractId'),
     // Передаем контроллер НАПРЯМУЮ, без обертки
     paymentController.createCheckoutSession

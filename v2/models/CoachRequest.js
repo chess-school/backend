@@ -12,6 +12,8 @@ const REQUEST_STATUSES = ['pending', 'approved', 'rejected'];
 const GOALS_MAX = 1000;
 
 const CoachRequestSchema = new Schema({
+    // Клуб-владелец (мульти-арендность #7). Проставляется при создании из req.club.
+    club: { type: Schema.Types.ObjectId, ref: 'Club', index: true },
     student: { type: Schema.Types.ObjectId, ref: 'TestUser', required: true },
     coach: { type: Schema.Types.ObjectId, ref: 'Coach', required: true },
     experience: { type: String, enum: EXPERIENCE_LEVELS, required: true },

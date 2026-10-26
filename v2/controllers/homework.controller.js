@@ -5,12 +5,17 @@ const homework = require('../services/homework.service');
 
 /** @route POST /api/v2/assignments  @access COACH — задать ДЗ к своему занятию */
 const createAssignment = async (req, res) => {
-    res.status(201).json({ data: await homework.createAssignment(req.user, req.body) });
+    res.status(201).json({ data: await homework.createAssignment(req.user, req.body, req.club) });
+};
+
+/** @route POST /api/v2/assignments/puzzles  @access COACH — задать ДЗ «решать задачи из задачника» */
+const createPuzzleAssignment = async (req, res) => {
+    res.status(201).json({ data: await homework.createPuzzleAssignment(req.user, req.body, req.club) });
 };
 
 /** @route GET /api/v2/assignments?scheduleId=  @access COACH — свои ДЗ */
 const listCoachAssignments = async (req, res) => {
-    res.json({ data: await homework.listCoachAssignments(req.user, req.query) });
+    res.json({ data: await homework.listCoachAssignments(req.user, req.query, req.club) });
 };
 
 /** @route PATCH /api/v2/assignments/:assignmentId  @access COACH (автор), ADMIN */
@@ -31,13 +36,13 @@ const listMyAssignments = async (req, res) => {
 
 /** @route PUT /api/v2/assignments/:assignmentId/submission  @access студент — сдать/пересдать */
 const submitAssignment = async (req, res) => {
-    const { submission, created } = await homework.submitAssignment(req.user, req.params.assignmentId, req.body, req.file);
+    const { submission, created } = await homework.submitAssignment(req.user, req.params.assignmentId, req.body, req.file, req.club);
     res.status(created ? 201 : 200).json({ data: submission });
 };
 
 /** @route GET /api/v2/submissions/review?status=  @access COACH — сдачи по моим ДЗ */
 const listSubmissionsForReview = async (req, res) => {
-    res.json({ data: await homework.listSubmissionsForReview(req.user, req.query) });
+    res.json({ data: await homework.listSubmissionsForReview(req.user, req.query, req.club) });
 };
 
 /** @route PATCH /api/v2/submissions/:submissionId/review  @access COACH (автор ДЗ), ADMIN */
@@ -58,6 +63,7 @@ const getSubmissionAttachment = async (req, res) => {
 
 module.exports = {
     createAssignment,
+    createPuzzleAssignment,
     listCoachAssignments,
     updateAssignment,
     deleteAssignment,

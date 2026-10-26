@@ -23,7 +23,7 @@ const createSchedule = async (req, res) => {
 
   const student = await User.findById(studentId);
   if (!student) {
-    return res.status(400).json({ msg: 'Invalid student' });
+    return res.status(400).json({ msg: req.t('controllers.scheduleOld.invalidStudent') });
   }
 
   const schedule = new Schedule({
@@ -57,7 +57,7 @@ const getCoachSchedule = async (req, res) => {
 const getScheduleByDate = async (req, res) => {
   const { date, type } = req.query;
   if (!date) {
-    return res.status(400).json({ msg: 'Date is required' });
+    return res.status(400).json({ msg: req.t('controllers.scheduleOld.dateRequired') });
   }
 
   let query = {
@@ -84,10 +84,10 @@ const updateSchedule = async (req, res) => {
   
   const schedule = await Schedule.findById(id);
   if (!schedule) {
-    return res.status(404).json({ msg: 'Schedule not found' });
+    return res.status(404).json({ msg: req.t('controllers.scheduleOld.notFound') });
   }
   if (schedule.coach.toString() !== req.user.id) {
-    return res.status(403).json({ msg: 'Unauthorized' });
+    return res.status(403).json({ msg: req.t('controllers.scheduleOld.unauthorized') });
   }
 
   const updateData = { date, title, description, link, type, status };
@@ -106,15 +106,15 @@ const markComplete = async (req, res) => {
   
   const schedule = await Schedule.findById(id);
   if (!schedule) {
-    return res.status(404).json({ msg: 'Schedule not found' });
+    return res.status(404).json({ msg: req.t('controllers.scheduleOld.notFound') });
   }
   if (schedule.coach.toString() !== req.user.id) {
-    return res.status(403).json({ msg: 'Unauthorized' });
+    return res.status(403).json({ msg: req.t('controllers.scheduleOld.unauthorized') });
   }
   
   schedule.status = 'completed';
   await schedule.save();
-  res.json({ msg: 'Schedule marked as completed' });
+  res.json({ msg: req.t('controllers.scheduleOld.markedComplete') });
 };
 
 const deleteSchedule = async (req, res) => {
@@ -122,17 +122,17 @@ const deleteSchedule = async (req, res) => {
   
   const result = await Schedule.findByIdAndDelete(id);
   if (!result) {
-      return res.status(404).json({ msg: 'Schedule not found' });
+      return res.status(404).json({ msg: req.t('controllers.scheduleOld.notFound') });
   }
 
-  res.json({ message: 'Schedule deleted successfully' });
+  res.json({ message: req.t('controllers.scheduleOld.deletedSuccess') });
 };
 
 const deleteStudentSchedule = async (req, res) => {
   const { studentId } = req.params;
   
   await Schedule.deleteMany({ student: studentId });
-  res.json({ msg: 'All schedule entries deleted for this student' });
+  res.json({ msg: req.t('controllers.scheduleOld.allStudentEntriesDeleted') });
 };
 
 module.exports = {

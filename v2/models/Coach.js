@@ -25,6 +25,8 @@ const LocalizedStringArraySchema = new Schema({
 
 // --- ОСНОВНАЯ СХЕМА ТРЕНЕРА ---
 const CoachSchema = new Schema({
+    // Клуб-владелец (мульти-арендность #7). Проставляется при создании из req.club.
+    club: { type: Schema.Types.ObjectId, ref: 'Club', index: true },
     // --- КЛЮЧЕВАЯ СВЯЗЬ ---
     user: {
         type: Schema.Types.ObjectId,

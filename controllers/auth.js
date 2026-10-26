@@ -65,12 +65,12 @@ const registration = async (req, res) => {
 
   await sendVerificationEmail(req.body.email, verificationToken, req.t);
 
+  // Токен подтверждения НЕ возвращаем в ответе — он уходит только письмом
   res.status(201).json({
     msg: req.t('api.registrationSuccess'),
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,
-    token: encodeURIComponent(verificationToken),
   });
 };
 
@@ -93,13 +93,19 @@ const login = async (req, res) => {
 
     const token = generateAccessToken(user._id, user.roles, user.sessionTokenVersion);
 
-    res.status(200).json({ user, token });
+    // Не отдаём наружу хеш пароля и служебные поля
+    const safeUser = user.toObject();
+    delete safeUser.password;
+    delete safeUser.verificationToken;
+    delete safeUser.sessionTokenVersion;
+
+    res.status(200).json({ user: safeUser, token });
 };
 
 // ✅ Verify email
 const verifyEmail = async (req, res) => {
   const { t } = req;
-  const user = await User.findOne({ verificationToken: req.query.token, emailVerified: false });
+  const user = await User.findOne({ verificationToken: String(req.query.token), emailVerified: false });
   if (!user) return res.status(400).json({ msg: t('api.auth.invalidToken') });
 
   user.emailVerified = true;
@@ -132,14 +138,14 @@ const resendVerificationEmail = async (req, res) => {
 // ✅ Check email verification status
 const checkVerificationStatus = async (req, res) => {
   const { t } = req;
-  const user = await User.findOne({ verificationToken: req.body.token });
+  const user = await User.findOne({ verificationToken: String(req.body.token) });
   if (!user) return res.status(404).json({ msg: t('api.auth.invalidToken') });
 
   res.json({ emailVerified: user.emailVerified });
 };
 
 const getUsers = async (req, res) => {
-  const users = await User.find();
+  const users = await User.find().select('-password -verificationToken -sessionTokenVersion');
   res.json(users);
 };
 

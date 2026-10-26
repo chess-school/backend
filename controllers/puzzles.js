@@ -9,7 +9,7 @@ class PuzzleController {
     try {
       const user = await User.findById(userId);
       if (!user || !['coach', 'admin'].includes(user.role)) {
-        return res.status(403).json({ msg: 'Access denied' });
+        return res.status(403).json({ msg: req.t('controllers.puzzles.accessDenied') });
       }
 
       const puzzle = new Puzzle({ name, pgn, solution, addedBy: userId });
@@ -18,7 +18,7 @@ class PuzzleController {
       if (collectionId) {
         const collection = await Collection.findById(collectionId);
         if (!collection) {
-          return res.status(404).json({ msg: 'Collection not found' });
+          return res.status(404).json({ msg: req.t('controllers.puzzles.collectionNotFound') });
         }
         collection.puzzles.push(puzzle._id);
         await collection.save();
@@ -27,7 +27,7 @@ class PuzzleController {
       return res.status(201).json(puzzle);
     } catch (error) {
       console.error(error);
-      return res.status(500).json({ error: 'Failed to create puzzle' });
+      return res.status(500).json({ error: req.t('controllers.puzzles.createPuzzleError') });
     }
   }
 
@@ -38,11 +38,11 @@ class PuzzleController {
     try {
       const puzzle = await Puzzle.findById(puzzleId);
       if (!puzzle) {
-        return res.status(404).json({ msg: 'Puzzle not found' });
+        return res.status(404).json({ msg: req.t('controllers.puzzles.puzzleNotFound') });
       }
 
       if (puzzle.addedBy.toString() !== userId) {
-        return res.status(403).json({ msg: 'You are not allowed to delete this puzzle' });
+        return res.status(403).json({ msg: req.t('controllers.puzzles.deletePuzzleForbidden') });
       }
 
       await puzzle.remove();
@@ -53,10 +53,10 @@ class PuzzleController {
         { $pull: { puzzles: puzzleId } }
       );
 
-      return res.json({ msg: 'Puzzle deleted successfully' });
+      return res.json({ msg: req.t('controllers.puzzles.puzzleDeleted') });
     } catch (error) {
       console.error(error);
-      return res.status(500).json({ error: 'Failed to delete puzzle' });
+      return res.status(500).json({ error: req.t('controllers.puzzles.deletePuzzleError') });
     }
   }
 
@@ -68,11 +68,11 @@ class PuzzleController {
     try {
       const puzzle = await Puzzle.findById(puzzleId);
       if (!puzzle) {
-        return res.status(404).json({ msg: 'Puzzle not found' });
+        return res.status(404).json({ msg: req.t('controllers.puzzles.puzzleNotFound') });
       }
 
       if (puzzle.addedBy.toString() !== userId) {
-        return res.status(403).json({ msg: 'You are not allowed to update this puzzle' });
+        return res.status(403).json({ msg: req.t('controllers.puzzles.updatePuzzleForbidden') });
       }
 
       puzzle.name = name || puzzle.name;
@@ -83,7 +83,7 @@ class PuzzleController {
       return res.json(puzzle);
     } catch (error) {
       console.error(error);
-      return res.status(500).json({ error: 'Failed to update puzzle' });
+      return res.status(500).json({ error: req.t('controllers.puzzles.updatePuzzleError') });
     }
   }
 
@@ -94,7 +94,7 @@ class PuzzleController {
     try {
       const user = await User.findById(userId);
       if (!user || !['coach', 'admin'].includes(user.role)) {
-        return res.status(403).json({ msg: 'Access denied' });
+        return res.status(403).json({ msg: req.t('controllers.puzzles.accessDenied') });
       }
 
       const collection = new Collection({ title, description, createdBy: userId });
@@ -102,7 +102,7 @@ class PuzzleController {
       return res.status(201).json(collection);
     } catch (error) {
       console.error(error);
-      return res.status(500).json({ error: 'Failed to create collection' });
+      return res.status(500).json({ error: req.t('controllers.puzzles.createCollectionError') });
     }
   }
 
@@ -113,18 +113,18 @@ class PuzzleController {
     try {
       const collection = await Collection.findById(collectionId);
       if (!collection) {
-        return res.status(404).json({ msg: 'Collection not found' });
+        return res.status(404).json({ msg: req.t('controllers.puzzles.collectionNotFound') });
       }
 
       if (collection.createdBy.toString() !== userId) {
-        return res.status(403).json({ msg: 'You are not allowed to delete this collection' });
+        return res.status(403).json({ msg: req.t('controllers.puzzles.deleteCollectionForbidden') });
       }
 
       await collection.remove();
-      return res.json({ msg: 'Collection deleted successfully' });
+      return res.json({ msg: req.t('controllers.puzzles.collectionDeleted') });
     } catch (error) {
       console.error(error);
-      return res.status(500).json({ error: 'Failed to delete collection' });
+      return res.status(500).json({ error: req.t('controllers.puzzles.deleteCollectionError') });
     }
   }
 
@@ -136,11 +136,11 @@ class PuzzleController {
     try {
       const collection = await Collection.findById(collectionId);
       if (!collection) {
-        return res.status(404).json({ msg: 'Collection not found' });
+        return res.status(404).json({ msg: req.t('controllers.puzzles.collectionNotFound') });
       }
 
       if (collection.createdBy.toString() !== userId) {
-        return res.status(403).json({ msg: 'You are not allowed to update this collection' });
+        return res.status(403).json({ msg: req.t('controllers.puzzles.updateCollectionForbidden') });
       }
 
       collection.title = title || collection.title;
@@ -150,7 +150,7 @@ class PuzzleController {
       return res.json(collection);
     } catch (error) {
       console.error(error);
-      return res.status(500).json({ error: 'Failed to update collection' });
+      return res.status(500).json({ error: req.t('controllers.puzzles.updateCollectionError') });
     }
   }
 
@@ -160,13 +160,13 @@ class PuzzleController {
     try {
       const collection = await Collection.findById(collectionId).populate('puzzles');
       if (!collection) {
-        return res.status(404).json({ msg: 'Collection not found' });
+        return res.status(404).json({ msg: req.t('controllers.puzzles.collectionNotFound') });
       }
 
       return res.json(collection.puzzles);
     } catch (error) {
       console.error(error);
-      return res.status(500).json({ error: 'Failed to get collection puzzles' });
+      return res.status(500).json({ error: req.t('controllers.puzzles.getCollectionPuzzlesError') });
     }
   }
 }

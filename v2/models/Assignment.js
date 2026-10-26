@@ -3,6 +3,8 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
 const AssignmentSchema = new Schema({
+    // Клуб-владелец (мульти-арендность #7). Проставляется при создании из req.club.
+    club: { type: Schema.Types.ObjectId, ref: 'Club', index: true },
     title: { type: String, required: true },
     description: { type: String }, // Подробное описание задания
     
@@ -24,8 +26,21 @@ const AssignmentSchema = new Schema({
 
     // Занятие в расписании, к которому задано ДЗ (не больше одного ДЗ на занятие)
     schedule: { type: Schema.Types.ObjectId, ref: 'ScheduleV2' },
-    
+
     dueDate: { type: Date }, // Срок сдачи
+
+    // Тип ДЗ: обычное (текст/скрин) или «решать задачи из задачника»
+    kind: { type: String, enum: ['generic', 'puzzles'], default: 'generic' },
+    // Для kind='puzzles': какой задачник решать и сколько задач всего
+    puzzleBook: { type: Schema.Types.ObjectId, ref: 'PuzzleBook' },
+    puzzleTarget: { type: Number, default: 0, min: 0 }, // сколько задач решить (0 — не задано)
+    // Необязательный план по дням: «сегодня N задач, завтра M…» (note — свободный текст «читать/делать»)
+    plan: [{
+        _id: false,
+        date: { type: Date, required: true },
+        puzzleCount: { type: Number, default: 0, min: 0 },
+        note: { type: String, default: '' },
+    }],
 
 }, { timestamps: true });
 

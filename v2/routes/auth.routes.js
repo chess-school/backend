@@ -3,7 +3,9 @@
 const express = require('express');
 const router = express.Router();
 const { check } = require('express-validator');
+const validate = require('../middleware/validate');
 const authController = require('../controllers/auth.controller');
+const coachController = require('../controllers/coach.controller');
 const withErrorHandling = require('../utils/withErrorHandling');
 
 // =================================================================
@@ -17,13 +19,13 @@ const withErrorHandling = require('../utils/withErrorHandling');
  */
 router.post(
     '/register',
-    [
+    validate([
         // Валидация входных данных
         check('firstName', 'First name is required').not().isEmpty().trim(),
         check('lastName', 'Last name is required').not().isEmpty().trim(),
         check('email', 'Please include a valid email').isEmail(),
         check('password', 'Password must be 6 or more characters').isLength({ min: 6 }),
-    ],
+    ]),
     authController.register
 );
 
@@ -34,10 +36,10 @@ router.post(
  */
 router.post(
     '/login',
-    [
+    validate([
         check('email', 'Please include a valid email').isEmail(),
         check('password', 'Password is required').exists(),
-    ],
+    ]),
     authController.login
 );
 
@@ -62,23 +64,34 @@ router.get(
  */
 router.post(
     '/resend-verification',
-    [
+    validate([
         check('email', 'Please include a valid email').isEmail(),
-    ],
+    ]),
     authController.resendVerificationEmail
 );
 
 /**
- * @route   POST /api/v2/auth/check-verification
- * @desc    Проверка статуса верификации (для UX на фронтенде)
+ * @route   GET /api/v2/auth/check-verification?email=...
+ * @desc    Проверка статуса верификации по email (опрос со страницы "проверьте почту")
+ * @access  Public
+ */
+router.get(
+    '/check-verification',
+    authController.checkVerificationStatus
+);
+
+// =================================================================
+//                      ТРЕНЕРЫ
+// =================================================================
+
+/**
+ * @route   POST /api/v2/auth/coaches-by-email
+ * @desc    Получить карточки тренеров по списку email (блок тренеров на главной)
  * @access  Public
  */
 router.post(
-    '/check-verification',
-    [
-        check('token', 'Verification token is required').not().isEmpty(),
-    ],
-    authController.checkVerificationStatus
+    '/coaches-by-email',
+    coachController.getCoachesByEmail
 );
 
 

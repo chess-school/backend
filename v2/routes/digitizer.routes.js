@@ -12,6 +12,7 @@ const { DIGITIZER_URL } = require('../services/digitizer.service');
 
 // Сессия и роли проверяются здесь по БД; микросервис ещё раз проверит подпись токена и роль
 router.use(authMiddleware);
+router.use(require('../middleware/resolveClubV2.middleware'));
 router.use(roleMiddleware(['COACH', 'ADMIN']));
 
 // Тайм-аут простоя соединения с микросервисом: загрузка книги — 5 мин без единого байта
@@ -47,7 +48,7 @@ const proxyTo = (buildPath, idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS) => (req, re
         // клиенту не отдаём 401, иначе фронтенд разлогинит пользователя
         if (status === 401) {
             upstreamRes.resume();
-            return sendError(res, 502, 'Digitizer rejected the token: JWT_SECRET of the digitizer and backend differ.');
+            return sendError(res, 502, req.t('controllers.digitizer.tokenRejected'));
         }
         res.status(status);
         PASSTHROUGH_HEADERS.forEach((name) => {
@@ -66,7 +67,7 @@ const proxyTo = (buildPath, idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS) => (req, re
         req.resume();
         if (responded) return;
         console.error('Digitizer proxy error:', e.message);
-        sendError(res, e.message.startsWith('no data') ? 504 : 502, 'Digitizer service is unavailable.');
+        sendError(res, e.message.startsWith('no data') ? 504 : 502, req.t('controllers.digitizer.unavailable'));
     });
     // Клиент закрыл вкладку или оборвал загрузку — не держим соединение с микросервисом
     res.on('close', () => {

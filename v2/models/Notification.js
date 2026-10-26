@@ -35,6 +35,7 @@ const NotificationSchema = new Schema({
             'SUBMISSION_REVIEWED',      // ДЗ проверено (уведомление для студента)
             'GROUP_INVITE',             // Приглашение в группу
             'NEW_GROUP_LESSON',         // Новое групповое занятие в расписании
+            'NEW_LESSON',               // Новое индивидуальное занятие в расписании
             'LESSON_REMINDER',          // Напоминание о занятии
             
             // Связанные с оплатами и курсами
@@ -43,7 +44,11 @@ const NotificationSchema = new Schema({
             'COACH_REQUEST_DECIDED',    // Тренер одобрил/отклонил заявку (для ученика)
             'PAYMENT_SUCCESSFUL',       // Платеж прошел успешно
             'PAYMENT_FAILED',           // Ошибка платежа
-            
+
+            // Заявки на роль тренера
+            'COACH_APPLICATION',          // Новая заявка на роль тренера (уведомление для админов)
+            'COACH_APPLICATION_DECIDED',  // Админ одобрил/отклонил заявку (для кандидата)
+
             // Социальные и системные
             'NEW_MESSAGE',              // Новое сообщение в чате
             'SYSTEM_ANNOUNCEMENT',      // Объявление от администрации

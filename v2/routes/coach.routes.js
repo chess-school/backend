@@ -4,7 +4,9 @@ const { body, param, query } = require('express-validator');
 const router = express.Router();
 const validate = require('../middleware/validate');
 const coachRequestController = require('../controllers/coachRequest.controller');
+const coachApplicationController = require('../controllers/coachApplication.controller');
 const CoachRequest = require('../models/CoachRequest');
+const CoachApplication = require('../models/CoachApplication');
 const withErrorHandling = require('../utils/withErrorHandling');
 const authMiddleware = require('../middleware/authV2.middleware');
 const roleMiddleware = require('../middleware/roleV2.middleware');
@@ -27,6 +29,8 @@ const groupController = require('../controllers/group.controller');
  */
 router.get(
     '/',
+    require('../middleware/optionalAuthV2.middleware'),
+    require('../middleware/resolveClubV2.middleware'),
     validate([
         query('page').optional().isInt({ min: 1 }).withMessage('page must be a positive integer'),
         query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('limit must be 1–50'),
@@ -52,6 +56,7 @@ router.get('/requests/sent', authMiddleware, coachRequestController.listSentRequ
 router.post(
     '/:coachId/requests',
     authMiddleware,
+    require('../middleware/resolveClubV2.middleware'),
     validate([
         param('coachId').isMongoId().withMessage('coachId must be a valid id'),
         body('experience').isIn(CoachRequest.EXPERIENCE_LEVELS).withMessage(`experience must be one of: ${CoachRequest.EXPERIENCE_LEVELS.join(', ')}`),
@@ -61,6 +66,66 @@ router.post(
     coachRequestController.createRequest
 );
 
+
+// =================================================================
+//          Заявки на роль тренера (кандидат -> админ)
+// =================================================================
+
+/**
+ * @route   GET /api/v2/coaches/applications/me
+ * @desc    Моя последняя заявка на роль тренера (статус на странице «Тренеры»)
+ */
+router.get('/applications/me', authMiddleware, coachApplicationController.getMine);
+
+/**
+ * @route   POST /api/v2/coaches/applications
+ * @desc    Подать заявку на роль тренера: { motivation, headline?, experience?, specializations?, contact?, fideProfile?, sourceLang? }
+ */
+router.post(
+    '/applications',
+    authMiddleware,
+    require('../middleware/resolveClubV2.middleware'),
+    validate([
+        body('motivation').isString().withMessage('motivation must be a string').bail().trim()
+            .isLength({ min: 1, max: CoachApplication.MOTIVATION_MAX }).withMessage(`motivation must be 1–${CoachApplication.MOTIVATION_MAX} characters`),
+        body('headline').optional().isString().trim().isLength({ max: 200 }).withMessage('headline must be at most 200 characters'),
+        body('experience').optional().isString().trim().isLength({ max: CoachApplication.EXPERIENCE_MAX }).withMessage(`experience must be at most ${CoachApplication.EXPERIENCE_MAX} characters`),
+        body('specializations').optional().isArray().withMessage('specializations must be an array'),
+        body('contact').optional().isString().trim().isLength({ max: 200 }).withMessage('contact must be at most 200 characters'),
+        body('fideProfile.title').optional().isIn(CoachApplication.FIDE_TITLES).withMessage(`title must be one of: ${CoachApplication.FIDE_TITLES.join(', ')}`),
+        body('fideProfile.profileUrl').optional({ values: 'falsy' }).isURL().withMessage('profileUrl must be a valid URL'),
+    ]),
+    coachApplicationController.submit
+);
+
+/**
+ * @route   GET /api/v2/coaches/applications?status=pending
+ * @desc    Все заявки на роль тренера (ADMIN)
+ */
+router.get(
+    '/applications',
+    authMiddleware,
+    require('../middleware/resolveClubV2.middleware'),
+    roleMiddleware(['ADMIN']),
+    validate([query('status').optional().isIn(CoachApplication.APPLICATION_STATUSES).withMessage(`status must be one of: ${CoachApplication.APPLICATION_STATUSES.join(', ')}`)]),
+    coachApplicationController.list
+);
+
+/**
+ * @route   PATCH /api/v2/coaches/applications/:applicationId
+ * @desc    Решение админа: { status: 'approved'|'rejected', adminNote? }
+ */
+router.patch(
+    '/applications/:applicationId',
+    authMiddleware,
+    roleMiddleware(['ADMIN']),
+    validate([
+        param('applicationId').isMongoId().withMessage('applicationId must be a valid id'),
+        body('status').isIn(['approved', 'rejected']).withMessage('status must be approved or rejected'),
+        body('adminNote').optional().isString().trim().isLength({ max: 2000 }).withMessage('adminNote must be at most 2000 characters'),
+    ]),
+    coachApplicationController.decide
+);
 
 // =================================================================
 //                 Приватные роуты для Тренеров
@@ -73,7 +138,7 @@ router.post(
 router.get(
     '/me',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    roleMiddleware(['COACH', 'ADMIN']),
     coachController.getMyCoachProfile
 );
 
@@ -84,8 +149,21 @@ router.get(
 router.put(
     '/me',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    require('../middleware/resolveClubV2.middleware'),
+    roleMiddleware(['COACH', 'ADMIN']),
     coachController.upsertMyCoachProfile
+);
+
+/**
+ * @route   PATCH /api/v2/coaches/me/verify
+ * @desc    Админ верифицирует свой собственный профиль тренера (самоподтверждение)
+ * @access  Private (role: ADMIN)
+ */
+router.patch(
+    '/me/verify',
+    authMiddleware,
+    roleMiddleware(['ADMIN']),
+    coachController.verifyMyCoachProfile
 );
 
 /**
@@ -95,7 +173,8 @@ router.put(
 router.get(
     '/me/courses',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    require('../middleware/resolveClubV2.middleware'),
+    roleMiddleware(['COACH', 'ADMIN']),
     courseController.getMyCourses
 );
 
@@ -106,7 +185,8 @@ router.get(
 router.get(
     '/me/groups',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    require('../middleware/resolveClubV2.middleware'),
+    roleMiddleware(['COACH', 'ADMIN']),
     groupController.getMyGroups
 );
 
@@ -117,6 +197,7 @@ router.get(
 router.get(
     '/me/requests',
     authMiddleware,
+    require('../middleware/resolveClubV2.middleware'),
     roleMiddleware(['COACH', 'ADMIN']),
     validate([query('status').optional().isIn(CoachRequest.REQUEST_STATUSES).withMessage(`status must be one of: ${CoachRequest.REQUEST_STATUSES.join(', ')}`)]),
     coachRequestController.listCoachRequests
@@ -133,9 +214,11 @@ router.patch(
     validate([
         param('requestId').isMongoId().withMessage('requestId must be a valid id'),
         body('status').isIn(['approved', 'rejected']).withMessage('status must be approved or rejected'),
+        // courseId необязателен: без него ученик записывается на персональный курс тренера
+        // (создаётся автоматически при первом одобрении) — см. coachRequest.service.decideRequest
         body('courseId')
-            .if(body('status').equals('approved'))
-            .isMongoId().withMessage('courseId is required to approve: the student is enrolled into this course'),
+            .optional({ values: 'falsy' })
+            .isMongoId().withMessage('courseId must be a valid id'),
     ]),
     coachRequestController.decideRequest
 );

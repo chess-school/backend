@@ -29,21 +29,24 @@ const onlyFields = (allowed) => body().custom((value) => {
     return true;
 });
 
+const resolveClub = require('../middleware/resolveClubV2.middleware');
 assignments.use(authMiddleware);
+assignments.use(resolveClub);
 submissions.use(authMiddleware);
+submissions.use(resolveClub);
 
 // ---------------------- задания ----------------------
 
 assignments.get('/my', controller.listMyAssignments);
 
 assignments.get('/',
-    roleMiddleware(['COACH']),
+    roleMiddleware(['COACH', 'ADMIN']),
     validate([query('scheduleId').optional().isMongoId().withMessage('scheduleId must be a valid id')]),
     controller.listCoachAssignments
 );
 
 assignments.post('/',
-    roleMiddleware(['COACH']),
+    roleMiddleware(['COACH', 'ADMIN']),
     validate([
         onlyFields(['scheduleId', 'title', 'description', 'dueDate']),
         body('scheduleId').exists().withMessage('scheduleId is required').bail().isMongoId().withMessage('scheduleId must be a valid id'),
@@ -52,6 +55,25 @@ assignments.post('/',
         dueDate(),
     ]),
     controller.createAssignment
+);
+
+assignments.post('/puzzles',
+    roleMiddleware(['COACH', 'ADMIN']),
+    validate([
+        onlyFields(['contextType', 'contextRefId', 'puzzleBookId', 'title', 'description', 'puzzleTarget', 'dueDate', 'plan']),
+        body('contextType').isIn(['student', 'group']).withMessage('contextType must be student or group'),
+        body('contextRefId').isMongoId().withMessage('contextRefId must be a valid id'),
+        body('puzzleBookId').isMongoId().withMessage('puzzleBookId must be a valid id'),
+        title(),
+        description(false),
+        body('puzzleTarget').optional().isInt({ min: 0, max: 100000 }).withMessage('puzzleTarget must be a non-negative integer'),
+        dueDate(),
+        body('plan').optional().isArray({ max: 60 }).withMessage('plan must be an array'),
+        body('plan.*.date').optional().isISO8601().withMessage('plan.date must be an ISO 8601 date'),
+        body('plan.*.puzzleCount').optional().isInt({ min: 0, max: 100000 }),
+        body('plan.*.note').optional().isString().bail().isLength({ max: 500 }),
+    ]),
+    controller.createPuzzleAssignment
 );
 
 assignments.patch('/:assignmentId',
@@ -85,7 +107,7 @@ assignments.put('/:assignmentId/submission',
 // ---------------------- сдачи ----------------------
 
 submissions.get('/review',
-    roleMiddleware(['COACH']),
+    roleMiddleware(['COACH', 'ADMIN']),
     validate([query('status').optional().isIn(['submitted', 'needs_revision', 'approved']).withMessage('status must be submitted, needs_revision or approved')]),
     controller.listSubmissionsForReview
 );

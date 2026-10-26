@@ -42,6 +42,12 @@ function createLocalizedDTO(document, lang, fieldsToLocalize = [], fieldsToKeep 
 
     const dto = {};
 
+    // 0. Идентификатор документа нужен клиенту почти всегда (без него фронт шлёт
+    //    запросы на /coaches/undefined/... → 400). Сохраняем _id, если он есть.
+    if (document._id !== undefined) {
+        dto._id = document._id;
+    }
+
     // 1. Локализуем указанные поля
     for (const field of fieldsToLocalize) {
         dto[field] = localize(document[field], lang);

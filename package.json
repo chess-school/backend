@@ -19,7 +19,7 @@
     "@aws-sdk/client-dynamodb": "^3.943.0",
     "@aws-sdk/lib-dynamodb": "^3.943.0",
     "@socket.io/redis-adapter": "^8.3.0",
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "body-parser": "^1.20.2",
     "chess": "^1.5.1",
     "chess.js": "^1.0.0-beta.8",
@@ -29,8 +29,6 @@
     "express": "^4.19.2",
     "express-rate-limit": "^8.0.1",
     "express-validator": "^7.2.0",
-    "firebase": "^11.1.0",
-    "firebase-admin": "^13.7.0",
     "helmet": "^8.3.0",
     "i18next": "^25.3.2",
     "i18next-fs-backend": "^2.6.0",
@@ -41,7 +39,7 @@
     "livekit-server-sdk": "^2.19.1",
     "mongoose": "^8.6.1",
     "multer": "^1.4.5-lts.2",
-    "nodemailer": "^8.0.2",
+    "nodemailer": "^10.2.1",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "socket.io": "^4.8.1",
@@ -53,5 +51,8 @@
     "mongodb-memory-server": "^10.1.4",
     "nodemon": "^3.1.4",
     "socket.io-client": "^4.8.1"
+  },
+  "overrides": {
+    "qs": "6.16.1"
   }
 }

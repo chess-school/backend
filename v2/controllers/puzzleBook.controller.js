@@ -2,9 +2,13 @@
 
 const mongoose = require('mongoose');
 const PuzzleBook = require('../models/PuzzleBook');
+const PuzzleAttempt = require('../models/PuzzleAttempt');
+const User = require('../models/User');
+const Group = require('../models/Group');
 const { getTask, getReadyChapterFiles, loadChapterExercises } = require('../services/digitizer.service');
 const { parseMainline } = require('../utils/pgnMainline');
 const { syncBookPuzzles, syncExercisePuzzle, updateBookPuzzlesMeta } = require('../services/bookPuzzle.service');
+const { computeRatingChange, DEFAULT_RATING } = require('../utils/puzzleRatingCalculator');
 
 const STAFF_ROLES = ['COACH', 'ADMIN'];
 const isStaff = (user) => user.roles.some((role) => STAFF_ROLES.includes(role));
@@ -12,15 +16,54 @@ const isStaff = (user) => user.roles.some((role) => STAFF_ROLES.includes(role));
 const MAX_TITLE = 200;
 const MAX_TEXT = 20000;
 
+// Поля, по которым решается доступ ученика (Module 1). Гарантируем их присутствие
+// в выборке независимо от проекции вызывающего, иначе доступ посчитается неверно.
+const ACCESS_FIELDS = ['status', 'visibility', 'allowedUsers', 'allowedGroups', 'isArchived'];
+
+const ensureAccessFields = (projection) => {
+    if (!projection) return projection; // полный документ — поля уже есть
+    const keys = Object.keys(projection).filter((k) => k !== '_id');
+    const isInclusion = keys.some((k) => projection[k] === 1 || projection[k] === true);
+    const p = { ...projection };
+    if (isInclusion) {
+        for (const f of ACCESS_FIELDS) p[f] = 1;        // добавляем нужные поля
+    } else {
+        for (const f of ACCESS_FIELDS) delete p[f];     // не даём их исключить
+    }
+    return p;
+};
+
+// Доступен ли задачник ученику (не staff). Пустая visibility => старое правило по status.
+const studentCanSeeBook = async (req, book) => {
+    if (book.isArchived) return false;
+    const uid = String(req.user.id);
+    switch (book.visibility) {
+        case 'public':
+            return true;
+        case 'private':
+            return (book.allowedUsers || []).some((id) => String(id) === uid);
+        case 'group': {
+            const groups = await Group.find({ members: req.user.id, _id: { $in: book.allowedGroups || [] } }).select('_id').lean();
+            return groups.length > 0;
+        }
+        default: // 'draft' или не задано — обратная совместимость
+            return book.status === 'published';
+    }
+};
+
 const findVisibleBook = async (req, res, projection) => {
     const { bookId } = req.params;
     if (!mongoose.Types.ObjectId.isValid(bookId)) {
         res.status(404).json({ msg: 'Puzzle book not found.', code: 'BOOK_NOT_FOUND' });
         return null;
     }
-    const book = await PuzzleBook.findById(bookId, projection);
-    // Черновики видны только тренерам и админам
-    if (!book || (book.status !== 'published' && !isStaff(req.user))) {
+    const book = await PuzzleBook.findById(bookId, ensureAccessFields(projection));
+    if (!book) {
+        res.status(404).json({ msg: 'Puzzle book not found.', code: 'BOOK_NOT_FOUND' });
+        return null;
+    }
+    // Тренеры и админы видят все задачники; ученик — по области видимости
+    if (!isStaff(req.user) && !(await studentCanSeeBook(req, book))) {
         res.status(404).json({ msg: 'Puzzle book not found.', code: 'BOOK_NOT_FOUND' });
         return null;
     }
@@ -69,6 +112,7 @@ const syncFromTask = async (req, res) => {
                 createdBy: req.user.id,
                 source: { taskId, importedChapters: [] },
                 exercises: [],
+                ...(req.club ? { club: req.club } : {}),
             });
         } catch (e) {
             if (e.code !== 11000) throw e;
@@ -116,13 +160,33 @@ const syncFromTask = async (req, res) => {
  * @access  Private
  */
 const getBooks = async (req, res) => {
-    const filter = isStaff(req.user) ? {} : { status: 'published' };
+    let match;
+    if (isStaff(req.user)) {
+        match = {}; // тренеры и админы видят все задачники (как и раньше)
+    } else {
+        const userId = new mongoose.Types.ObjectId(String(req.user.id));
+        const groups = await Group.find({ members: userId }).select('_id').lean();
+        const groupIds = groups.map((g) => g._id);
+        const notArchived = { isArchived: { $ne: true } };
+        match = { $or: [
+            // легаси/публичные: опубликованные и не помеченные как private/group ($nin матчит и отсутствующее поле)
+            { status: 'published', visibility: { $nin: ['private', 'group'] }, ...notArchived },
+            { visibility: 'public', ...notArchived },
+            { visibility: 'private', allowedUsers: userId, ...notArchived },
+            { visibility: 'group', allowedGroups: { $in: groupIds }, ...notArchived },
+        ] };
+    }
+    // Изоляция по клубу (#7): если активный клуб определён — только его задачники
+    const clubMatch = req.club ? { club: new mongoose.Types.ObjectId(String(req.club)) } : {};
     const books = await PuzzleBook.aggregate([
-        { $match: filter },
+        { $match: { ...match, ...clubMatch } },
         { $sort: { createdAt: -1 } },
         {
             $project: {
-                title: 1, description: 1, status: 1, createdAt: 1, updatedAt: 1,
+                title: 1, description: 1, status: 1, visibility: 1, isArchived: 1,
+                allowedUsersCount: { $size: { $ifNull: ['$allowedUsers', []] } },
+                allowedGroupsCount: { $size: { $ifNull: ['$allowedGroups', []] } },
+                createdAt: 1, updatedAt: 1,
                 exercisesCount: { $size: '$exercises' },
             },
         },
@@ -150,7 +214,7 @@ const updateBook = async (req, res) => {
     const book = await findVisibleBook(req, res, { exercises: 0 });
     if (!book) return;
 
-    const { title, description, status } = req.body;
+    const { title, description, status, solveSettings } = req.body;
     if (title !== undefined) {
         if (typeof title !== 'string' || !title.trim() || title.length > MAX_TITLE) {
             return res.status(400).json({ msg: 'Invalid title.', code: 'VALIDATION_ERROR' });
@@ -164,10 +228,49 @@ const updateBook = async (req, res) => {
         }
         book.status = status;
     }
+    // --- Управление доступом (Module 1) ---
+    const { visibility, allowedUsers, allowedGroups, isArchived } = req.body;
+    if (visibility !== undefined) {
+        if (!['draft', 'private', 'group', 'public'].includes(visibility)) {
+            return res.status(400).json({ msg: 'Invalid visibility.', code: 'INVALID_VISIBILITY' });
+        }
+        book.visibility = visibility;
+    }
+    if (allowedUsers !== undefined) {
+        if (!Array.isArray(allowedUsers) || !allowedUsers.every((id) => mongoose.Types.ObjectId.isValid(id))) {
+            return res.status(400).json({ msg: 'allowedUsers must be an array of user IDs.', code: 'VALIDATION_ERROR' });
+        }
+        book.allowedUsers = allowedUsers;
+    }
+    if (allowedGroups !== undefined) {
+        if (!Array.isArray(allowedGroups) || !allowedGroups.every((id) => mongoose.Types.ObjectId.isValid(id))) {
+            return res.status(400).json({ msg: 'allowedGroups must be an array of group IDs.', code: 'VALIDATION_ERROR' });
+        }
+        book.allowedGroups = allowedGroups;
+    }
+    if (isArchived !== undefined) book.isArchived = !!isArchived;
+    // Настройки режима решения — частичное обновление: присланные поля перекрывают текущие (с клампом)
+    if (solveSettings !== undefined && solveSettings && typeof solveSettings === 'object') {
+        const cur = (book.solveSettings && book.solveSettings.toObject) ? book.solveSettings.toObject() : (book.solveSettings || {});
+        const clampInt = (v, lo, hi, dflt) => {
+            const n = Math.round(Number(v));
+            return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt;
+        };
+        const bool = (v, dflt) => (typeof v === 'boolean' ? v : dflt);
+        book.solveSettings = {
+            hintsEnabled: bool(solveSettings.hintsEnabled, cur.hintsEnabled ?? true),
+            hintUnlockMinutes: solveSettings.hintUnlockMinutes !== undefined ? clampInt(solveSettings.hintUnlockMinutes, 0, 180, cur.hintUnlockMinutes ?? 10) : (cur.hintUnlockMinutes ?? 10),
+            hintUnlockMistakes: solveSettings.hintUnlockMistakes !== undefined ? clampInt(solveSettings.hintUnlockMistakes, 0, 50, cur.hintUnlockMistakes ?? 5) : (cur.hintUnlockMistakes ?? 5),
+            allowShowSolution: bool(solveSettings.allowShowSolution, cur.allowShowSolution ?? false),
+            showPlayerNames: bool(solveSettings.showPlayerNames, cur.showPlayerNames ?? true),
+        };
+    }
     await book.save();
     // Опубликованная книга — её задачи появляются в общем потоке «Задачи»; снятая — исчезают
     await updateBookPuzzlesMeta(book);
-    res.json({ data: { _id: book._id, title: book.title, description: book.description, status: book.status } });
+    res.json({ data: { _id: book._id, title: book.title, description: book.description, status: book.status,
+        visibility: book.visibility, allowedUsers: book.allowedUsers, allowedGroups: book.allowedGroups,
+        isArchived: book.isArchived, solveSettings: book.solveSettings } });
 };
 
 /**
@@ -226,4 +329,115 @@ const updateExercise = async (req, res) => {
     res.json({ data: book.exercises[0], puzzle });
 };
 
-module.exports = { syncFromTask, getBooks, getBook, updateBook, updateExercise };
+/**
+ * @desc    Зафиксировать попытку решения упражнения (для модуля статистики)
+ * @route   POST /api/v2/puzzle-books/:bookId/attempts
+ * @access  Private (любой авторизованный — ученик)
+ */
+const recordAttempt = async (req, res) => {
+    // Проекция включает status (нужен findVisibleBook для проверки публикации) и rating упражнений (пересчёт Elo, Module 4)
+    const book = await findVisibleBook(req, res, { status: 1, 'exercises._id': 1, 'exercises.rating': 1 });
+    if (!book) return;
+    const { exerciseId } = req.body;
+    const exercise = book.exercises.find((e) => String(e._id) === String(exerciseId));
+    if (!exercise) {
+        return res.status(400).json({ msg: 'Unknown exercise.', code: 'VALIDATION_ERROR' });
+    }
+    const num = (v, hi) => Math.min(hi, Math.max(0, Math.round(Number(v)) || 0));
+    const solved = req.body.solved !== false;
+    const usedHint = req.body.usedHint === true;
+    const mistakes = num(req.body.attemptsCount, 100000);
+
+    await PuzzleAttempt.create({
+        student: req.user.id,
+        puzzleBook: book._id,
+        exerciseId: String(exerciseId),
+        solved,
+        timeTakenSeconds: num(req.body.timeTakenSeconds, 86400),
+        attemptsCount: mistakes,
+        usedHint,
+    });
+
+    // --- Динамический рейтинг (Module 4) ---
+    // Успех засчитывается только при решении с 1-й попытки без подсказок.
+    const success = solved && !usedHint && mistakes === 0;
+
+    const userDoc = await User.findById(req.user.id).select('puzzleRating puzzleRatingGames');
+    const userRating = (userDoc && Number.isFinite(userDoc.puzzleRating)) ? userDoc.puzzleRating : DEFAULT_RATING;
+    const puzzleRating = Number.isFinite(exercise.rating) ? exercise.rating : DEFAULT_RATING;
+
+    const change = computeRatingChange({ userRating, puzzleRating, success });
+
+    // Персист: рейтинг ученика и рейтинг конкретного упражнения (атомарно через позиционный $)
+    await Promise.all([
+        User.updateOne({ _id: req.user.id }, { $set: { puzzleRating: change.newUserRating }, $inc: { puzzleRatingGames: 1 } }),
+        PuzzleBook.updateOne(
+            { _id: book._id, 'exercises._id': exerciseId },
+            { $set: { 'exercises.$.rating': change.newPuzzleRating }, $inc: { 'exercises.$.ratingAttempts': 1 } },
+        ),
+    ]);
+
+    res.status(201).json({ data: {
+        ok: true,
+        rating: {
+            success,
+            userDelta: change.userDelta,
+            puzzleDelta: change.puzzleDelta,
+            userRating: change.newUserRating,
+            userRatingBefore: userRating,
+            puzzleRating: change.newPuzzleRating,
+            puzzleRatingBefore: puzzleRating,
+        },
+    } });
+};
+
+/**
+ * @desc    Статистика решения задачника по ученикам (прогресс для тренера)
+ * @route   GET /api/v2/puzzle-books/:bookId/stats
+ * @access  Private (COACH, ADMIN)
+ */
+const getBookStats = async (req, res) => {
+    const book = await findVisibleBook(req, res, { 'exercises._id': 1 });
+    if (!book) return;
+    const bookId = new mongoose.Types.ObjectId(String(book._id));
+    // Сначала сворачиваем попытки до «лучшего» по каждому упражнению ученика, затем агрегируем по ученику
+    const rows = await PuzzleAttempt.aggregate([
+        { $match: { puzzleBook: bookId } },
+        { $group: {
+            _id: { student: '$student', exercise: '$exerciseId' },
+            solved: { $max: { $cond: ['$solved', 1, 0] } },
+            attempts: { $sum: 1 },
+            mistakes: { $sum: '$attemptsCount' },
+            time: { $sum: '$timeTakenSeconds' },
+            hint: { $max: { $cond: ['$usedHint', 1, 0] } },
+            last: { $max: '$updatedAt' },
+        } },
+        { $group: {
+            _id: '$_id.student',
+            solvedCount: { $sum: '$solved' },
+            exercisesAttempted: { $sum: 1 },
+            attempts: { $sum: '$attempts' },
+            totalMistakes: { $sum: '$mistakes' },
+            totalTimeSeconds: { $sum: '$time' },
+            hintsUsed: { $sum: '$hint' },
+            lastActivity: { $max: '$last' },
+        } },
+        { $sort: { lastActivity: -1 } },
+    ]);
+    const users = await User.find({ _id: { $in: rows.map((r) => r._id) } })
+        .select('firstName lastName email uuid').lean();
+    const byId = new Map(users.map((u) => [String(u._id), u]));
+    const students = rows.map((r) => ({
+        student: byId.get(String(r._id)) || { _id: r._id, firstName: '', lastName: '', email: '' },
+        solvedCount: r.solvedCount,
+        exercisesAttempted: r.exercisesAttempted,
+        attempts: r.attempts,
+        totalMistakes: r.totalMistakes,
+        totalTimeSeconds: r.totalTimeSeconds,
+        hintsUsed: r.hintsUsed,
+        lastActivity: r.lastActivity,
+    }));
+    res.json({ data: { totalExercises: book.exercises.length, students } });
+};
+
+module.exports = { syncFromTask, getBooks, getBook, updateBook, updateExercise, recordAttempt, getBookStats };

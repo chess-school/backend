@@ -32,6 +32,8 @@ const ModuleSchema = new Schema({
 
 // Основная схема курса
 const CourseSchema = new Schema({
+    // Клуб-владелец (мульти-арендность #7). Проставляется при создании из req.club.
+    club: { type: Schema.Types.ObjectId, ref: 'Club', index: true },
     // --- Основная информация о курсе ---
     title: {
         type: String,
@@ -66,10 +68,36 @@ const CourseSchema = new Schema({
     },
     status: {
         type: String,
-        enum: ['draft', 'published', 'archived'], // Статус курса
+        enum: ['draft', 'published', 'archived'], // Устаревший статус публикации (оставлен для обратной совместимости каталога)
         default: 'draft',
     },
-    
+
+    // --- Область видимости и управление доступом (Module 1) ---
+    // draft    — виден только автору и админу (черновик);
+    // private  — виден автору/админу и ученикам из allowedUsers;
+    // group    — виден автору/админу и ученикам из групп allowedGroups;
+    // public   — виден всем (каталог).
+    visibility: {
+        type: String,
+        enum: ['draft', 'private', 'group', 'public'],
+        default: 'draft',
+    },
+    // Индивидуальный доступ ученикам (ref на модель пользователя v2 — зарегистрирована как 'TestUser')
+    allowedUsers: [{
+        type: Schema.Types.ObjectId,
+        ref: 'TestUser',
+    }],
+    // Доступ целым группам учеников
+    allowedGroups: [{
+        type: Schema.Types.ObjectId,
+        ref: 'Group',
+    }],
+    // Мягкое архивирование: архивные курсы скрыты из каталога, но доступны автору/админу
+    isArchived: {
+        type: Boolean,
+        default: false,
+    },
+
     // --- Категоризация и метаданные ---
     level: { // Уровень сложности
         type: String,
@@ -87,6 +115,10 @@ const CourseSchema = new Schema({
 
 // Курсы тренера (кабинет тренера, проверка авторства при записи студента)
 CourseSchema.index({ authors: 1 });
+// Фильтрация каталога/доступа по области видимости (Module 1)
+CourseSchema.index({ visibility: 1, isArchived: 1 });
+CourseSchema.index({ allowedUsers: 1 });
+CourseSchema.index({ allowedGroups: 1 });
 
 
 // Индекс для текстового поиска по названию и описанию

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const withErrorHandling = require('../utils/withErrorHandling');
 const authMiddleware = require('../middleware/authV2.middleware');
+const optionalAuthMiddleware = require('../middleware/optionalAuthV2.middleware');
 const roleMiddleware = require('../middleware/roleV2.middleware');
 const courseController = require('../controllers/course.controller');
 
@@ -13,8 +14,16 @@ const courseController = require('../controllers/course.controller');
  * @route   GET /api/v2/courses
  * @desc    Получить список курсов или один курс по ID.
  *          Примеры: /courses?level=beginner, /courses?courseId=...
+ *          optionalAuth: выдача зависит от роли (админ/тренер/ученик/гость).
  */
-router.get('/', courseController.getPublicCourses);
+router.get('/', optionalAuthMiddleware, require('../middleware/resolveClubV2.middleware'), courseController.getPublicCourses);
+
+/**
+ * @route   GET /api/v2/courses/:courseId
+ * @desc    Получить один курс. Приватные/черновые курсы для посторонних → 403.
+ *          optionalAuth: роль влияет на доступ.
+ */
+router.get('/:courseId', optionalAuthMiddleware, courseController.getCourseById);
 
 
 // =================================================================
@@ -31,7 +40,8 @@ router.get('/', courseController.getPublicCourses);
 router.post(
     '/',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    require('../middleware/resolveClubV2.middleware'),
+    roleMiddleware(['COACH', 'ADMIN']),
     courseController.createCourse
 );
 
@@ -42,7 +52,7 @@ router.post(
 router.put(
     '/:courseId',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    roleMiddleware(['COACH', 'ADMIN']),
     courseController.updateCourse
 );
 
@@ -53,7 +63,7 @@ router.put(
 router.patch(
     '/:courseId/status',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    roleMiddleware(['COACH', 'ADMIN']),
     courseController.updateCourseStatus
 );
 

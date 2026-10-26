@@ -8,21 +8,34 @@
 //     сдача, ничья по соглашению; отмена (abort), если первые ходы не сделаны за abortTimeoutMs;
 //   — флаг при «голом» короле (или короле с одной лёгкой фигурой) у соперника — ничья, как на Lichess;
 //   — рейтинговая партия пересчитывает Glicko-2 обоих игроков в категории контроля времени.
-// Активные партии живут в памяти процесса; после перезапуска восстанавливаются из БД (moves + clock).
-// Зависимости (время, таймеры, рассылка) внедряются — так часы и таймауты проверяются в тестах.
+//
+// Два режима хранения активной партии (ШАГ 1):
+//   • одиночный (по умолчанию, тесты): состояние живёт в Map процесса, каждый ход пишется в Mongo
+//     синхронно (оптимистичная блокировка по $size) — прежнее, проверенное поведение;
+//   • кластерный (REDIS_URL задан): авторитетное состояние (fen/moves/clock) живёт в Redis, ход
+//     сериализуется распределённым локом на партию, ack не ждёт Mongo — запись в Mongo идёт
+//     «вдогонку» (write-behind), а полный итог фиксируется в Mongo при завершении партии. Так любой
+//     процесс кластера может вести любую партию, а задержка хода не упирается в round-trip к БД.
+// Зависимости (время, таймеры, рассылка, redis) внедряются — часы и таймауты проверяются в тестах.
 
 const { Chess } = require('chess.js');
 const LiveGame = require('../../models/LiveGame');
 const User = require('../../models/User');
 const { GameClock } = require('./clock');
+const redisModule = require('./redis');
 const { rateGame, isProvisional, DEFAULT_RATING } = require('../../utils/ratingCalculator');
 const { badRequest, conflict, forbidden, notFound } = require('../../utils/apiError');
 
 const ABORT_TIMEOUT_MS = 30000;
+// Кластер: как часто максимум сбрасывать промежуточное состояние активной партии в Mongo.
+// Запись коалесцируется (пишется только последнее состояние), т.к. авторитет — Redis, а полный
+// итог партии всё равно фиксируется в Mongo при finish.
+const WRITE_BEHIND_MS = 1500;
 const PLAYER_FIELDS = 'uuid firstName lastName avatarUrl ratings';
 
 const opposite = (color) => (color === 'white' ? 'black' : 'white');
 const colorOfTurn = (chess) => (chess.turn() === 'w' ? 'white' : 'black');
+const movesOf = (chess) => chess.history({ verbose: true }).map((m) => `${m.from}${m.to}${m.promotion ?? ''}`);
 
 /** Может ли сторона в принципе поставить мат (иначе флаг соперника — ничья) */
 const hasMatingMaterial = (chess, color) => {
@@ -59,13 +72,26 @@ const createGameManager = ({
     emitToGame = () => {},
     emitToUser = () => {},
     abortTimeoutMs = ABORT_TIMEOUT_MS,
+    writeBehindMs = WRITE_BEHIND_MS,
+    redis = redisModule,
+    clustered,
 } = {}) => {
-    /** gameId -> состояние активной партии */
-    const games = new Map();
-    /** gameId -> цепочка промисов (последовательная обработка) */
-    const locks = new Map();
+    const isClustered = clustered !== undefined ? clustered : redis.isClustered();
 
-    const withLock = (gameId, fn) => {
+    /** gameId -> состояние активной партии (кэш одиночного режима) */
+    const games = new Map();
+    /** gameId -> цепочка промисов (последовательная обработка в этом процессе) */
+    const locks = new Map();
+    /** gameId -> id серверного таймера (флаг/отмена). Вынесен из state: в кластере state пересобирается */
+    const timers = new Map();
+    /** gameId -> хвост очереди отложенной записи в Mongo (кластер) */
+    const writeQueue = new Map();
+    /** gameId -> последнее состояние, ожидающее сброса в Mongo (коалесцирование write-behind) */
+    const pendingWrite = new Map();
+    /** gameId -> таймер отложенного сброса write-behind */
+    const writeTimers = new Map();
+
+    const inProcessChain = (gameId, fn) => {
         const key = String(gameId);
         const prev = locks.get(key) || Promise.resolve();
         const run = prev.then(fn, fn);
@@ -75,38 +101,83 @@ const createGameManager = ({
         return run;
     };
 
-    const ply = (state) => state.chess.history().length;
+    // В кластере — распределённый лок поверх внутрипроцессной очереди (меньше round-trip'ов к Redis
+    // при конкуренции внутри одного процесса, но безопасность между процессами гарантирована).
+    const withLock = isClustered
+        ? (gameId, fn) => inProcessChain(gameId, () => redis.withRedisLock(String(gameId), fn))
+        : inProcessChain;
 
+    const ply = (state) => state.chess.history().length;
     const clockSnapshot = (state, t = now()) => state.clock.snapshot(t);
+    const logError = (e) => console.error('Play engine error:', e);
+
+    // ------------------------------------------------------------ (де)сериализация состояния
+    const buildState = ({ id, white, black, isRated, timeControl, moves, clock, drawOfferBy, waitingSince }) => {
+        const chess = new Chess();
+        for (const uci of moves || []) chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || undefined });
+        const gc = new GameClock({
+            initialMs: timeControl.initialSeconds * 1000,
+            incrementMs: timeControl.incrementSeconds * 1000,
+            whiteMs: clock?.whiteMs ?? timeControl.initialSeconds * 1000,
+            blackMs: clock?.blackMs ?? timeControl.initialSeconds * 1000,
+            turn: clock?.turn ?? colorOfTurn(chess),
+            turnStartedAt: clock?.turnStartedAt ? new Date(clock.turnStartedAt).getTime() : null,
+        });
+        return { id: String(id), white: String(white), black: String(black), isRated, timeControl, chess, clock: gc, drawOfferBy: drawOfferBy || null, waitingSince };
+    };
+
+    const fromDocument = (doc) => {
+        const tc = doc.timeControl;
+        return buildState({
+            id: doc._id, white: doc.whitePlayer, black: doc.blackPlayer, isRated: doc.isRated,
+            timeControl: { type: tc.type, initialSeconds: tc.initialSeconds, incrementSeconds: tc.incrementSeconds, custom: !!tc.custom },
+            moves: doc.moves,
+            // turn не передаём — buildState выведет его из списка ходов (fen может отставать при write-behind)
+            clock: { whiteMs: doc.clock?.whiteMs, blackMs: doc.clock?.blackMs, turnStartedAt: doc.clock?.turnStartedAt || null },
+            drawOfferBy: doc.drawOfferBy,
+            waitingSince: new Date(doc.clock?.turnStartedAt || doc.updatedAt || doc.startedAt || now()).getTime(),
+        });
+    };
+
+    /** Сериализованный снимок активной партии для Redis */
+    const serialize = (state) => ({
+        id: state.id, white: state.white, black: state.black, isRated: state.isRated, timeControl: state.timeControl,
+        moves: movesOf(state.chess), sanMoves: state.chess.history(), fen: state.chess.fen(),
+        clock: { whiteMs: state.clock.ms.white, blackMs: state.clock.ms.black, turn: state.clock.turn, turnStartedAt: state.clock.turnStartedAt },
+        drawOfferBy: state.drawOfferBy, waitingSince: state.waitingSince,
+    });
 
     // ------------------------------------------------------------ таймеры
+    const clearGameTimer = (id) => {
+        const t = timers.get(String(id));
+        if (t) clearTimer(t);
+        timers.delete(String(id));
+    };
 
     // Колбэки таймеров возвращают промис обработки — тесты с фейковыми таймерами могут его дождаться
     const schedule = (state) => {
-        if (state.timer) clearTimer(state.timer);
-        state.timer = null;
+        const id = String(state.id);
+        clearGameTimer(id);
         const t = now();
         if (ply(state) < 2) {
             // Первые ходы: часы стоят, но бесконечно ждать нельзя — отмена партии
             const wait = Math.max(0, state.waitingSince + abortTimeoutMs - t);
-            state.timer = setTimer(() => withLock(state.id, () => onAbortTimer(state.id)).catch(logError), wait);
+            timers.set(id, setTimer(() => withLock(id, () => onAbortTimer(id)).catch(logError), wait));
         } else {
             const wait = state.clock.msToFlag(t);
-            if (Number.isFinite(wait)) state.timer = setTimer(() => withLock(state.id, () => onFlagTimer(state.id)).catch(logError), wait + 1);
+            if (Number.isFinite(wait)) timers.set(id, setTimer(() => withLock(id, () => onFlagTimer(id)).catch(logError), wait + 1));
         }
     };
 
-    const logError = (e) => console.error('Play engine error:', e);
-
     const onAbortTimer = async (gameId) => {
-        const state = games.get(String(gameId));
+        const state = await getActive(gameId);
         if (!state || ply(state) >= 2) return;
         if (now() - state.waitingSince + 5 < abortTimeoutMs) { schedule(state); return; }
         await finish(state, { winner: null, reason: 'aborted', aborted: true });
     };
 
     const onFlagTimer = async (gameId) => {
-        const state = games.get(String(gameId));
+        const state = await getActive(gameId);
         if (!state) return;
         if (!state.clock.flagged(now())) { schedule(state); return; } // таймер сработал рано
         await flag(state);
@@ -116,54 +187,41 @@ const createGameManager = ({
     const flag = async (state) => {
         const loser = state.clock.turn;
         const winner = opposite(loser);
-        // Соперник не может поставить мат никак — ничья (как на Lichess)
         const result = hasMatingMaterial(state.chess, winner) ? winner : 'draw';
         await finish(state, { winner: result, reason: 'timeout' });
     };
 
     // ------------------------------------------------------------ загрузка / восстановление
 
-    const fromDocument = (doc) => {
-        const chess = new Chess();
-        for (const uci of doc.moves || []) {
-            chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] });
-        }
-        const tc = doc.timeControl;
-        const clock = new GameClock({
-            initialMs: tc.initialSeconds * 1000,
-            incrementMs: tc.incrementSeconds * 1000,
-            whiteMs: doc.clock?.whiteMs ?? tc.initialSeconds * 1000,
-            blackMs: doc.clock?.blackMs ?? tc.initialSeconds * 1000,
-            turn: colorOfTurn(chess),
-            turnStartedAt: doc.clock?.turnStartedAt ? new Date(doc.clock.turnStartedAt).getTime() : null,
-        });
-        return {
-            id: String(doc._id),
-            white: String(doc.whitePlayer),
-            black: String(doc.blackPlayer),
-            isRated: doc.isRated,
-            timeControl: { type: tc.type, initialSeconds: tc.initialSeconds, incrementSeconds: tc.incrementSeconds, custom: !!tc.custom },
-            chess,
-            clock,
-            drawOfferBy: doc.drawOfferBy || null,
-            waitingSince: new Date(doc.clock?.turnStartedAt || doc.updatedAt || doc.startedAt || now()).getTime(),
-            timer: null,
-        };
-    };
+    /** Текущее состояние активной партии для таймеров: кэш (одиночный) или Redis/Mongo (кластер) */
+    const getActive = (gameId) => (isClustered ? load(gameId) : Promise.resolve(games.get(String(gameId)) || null));
 
-    /** Активная партия в памяти; после перезапуска — из БД (с упавшим за это время флагом) */
+    /** Активная партия: из памяти/Redis, иначе из БД (с упавшим за это время флагом) */
     const load = async (gameId) => {
         const key = String(gameId);
-        if (games.has(key)) return games.get(key);
-        const doc = await LiveGame.findById(key).lean();
-        if (!doc || doc.status !== 'active') return null;
-        const state = fromDocument(doc);
-        games.set(key, state);
-        if (state.clock.flagged(now())) {
-            await flag(state);
-            return null;
+
+        if (!isClustered) {
+            if (games.has(key)) return games.get(key);
+            const doc = await LiveGame.findById(key).lean();
+            if (!doc || doc.status !== 'active') return null;
+            const state = fromDocument(doc);
+            games.set(key, state);
+            if (state.clock.flagged(now())) { await flag(state); return null; }
+            schedule(state);
+            return state;
         }
-        schedule(state);
+
+        // Кластер: авторитет — Redis; промах — восстановление из Mongo (и заполнение Redis).
+        let state;
+        const snap = await redis.loadState(key);
+        if (snap) state = buildState(snap);
+        else {
+            const doc = await LiveGame.findById(key).lean();
+            if (!doc || doc.status !== 'active') return null;
+            state = fromDocument(doc);
+            await redis.saveState(key, serialize(state));
+        }
+        if (state.clock.flagged(now())) { await flag(state); return null; }
         return state;
     };
 
@@ -171,7 +229,8 @@ const createGameManager = ({
     const activate = (doc) => {
         const state = fromDocument(doc);
         state.waitingSince = now();
-        games.set(state.id, state);
+        if (isClustered) redis.saveState(state.id, serialize(state)).catch(logError);
+        else games.set(state.id, state);
         schedule(state);
         return state;
     };
@@ -205,8 +264,7 @@ const createGameManager = ({
     };
 
     const finish = async (state, { winner, reason, aborted = false }) => {
-        if (state.timer) clearTimer(state.timer);
-        state.timer = null;
+        clearGameTimer(state.id);
         const t = now();
         state.clock.stop(t);
         games.delete(state.id);
@@ -220,10 +278,15 @@ const createGameManager = ({
             clock: state.clock.toDocument(),
             drawOfferBy: null,
             fen: state.chess.fen(),
+            moves: movesOf(state.chess),
+            sanMoves: state.chess.history(),
             pgn: state.chess.pgn(),
             ...(rating ? { ratingChanges: rating.ratingChanges, ratings: rating.ratings } : {}),
         };
+        // Итог — полный и авторитетный — всегда пишется в Mongo; Redis-ключ партии убираем
         await LiveGame.updateOne({ _id: state.id, status: 'active' }, { $set: update });
+        if (isClustered) { clearWriteBehind(String(state.id)); await redis.deleteState(state.id).catch(logError); writeQueue.delete(String(state.id)); }
+
         const payload = {
             gameId: state.id,
             status: update.status,
@@ -248,6 +311,64 @@ const createGameManager = ({
         return null;
     };
 
+    // ------------------------------------------------------------ сохранение хода
+
+    /** Сбросить последнее накопленное состояние партии в Mongo (по таймеру коалесцирования) */
+    const flushWrite = (id) => {
+        writeTimers.delete(id);
+        const snap = pendingWrite.get(id);
+        if (!snap) return;
+        pendingWrite.delete(id);
+        const prev = writeQueue.get(id) || Promise.resolve();
+        // Фильтр status:'active' защищает от гонки с finish: если партия уже завершилась,
+        // отложенный сброс просто не найдёт документа (matchedCount 0) и ничего не перезапишет.
+        const next = prev
+            .then(() => LiveGame.updateOne({ _id: id, status: 'active' }, { $set: snap }))
+            .catch((e) => console.error('Write-behind to Mongo failed:', e.message));
+        writeQueue.set(id, next);
+        next.then(() => { if (writeQueue.get(id) === next) writeQueue.delete(id); });
+    };
+
+    /** Снять отложенный сброс (конец партии / остановка) */
+    const clearWriteBehind = (id) => {
+        const t = writeTimers.get(id);
+        if (t) clearTimer(t);
+        writeTimers.delete(id);
+        pendingWrite.delete(id);
+    };
+
+    /**
+     * Запись хода «вдогонку» в Mongo (кластер): ack не ждёт БД. Коалесцируется — держим ТОЛЬКО
+     * последнее состояние и пишем его не чаще writeBehindMs, снимая нагрузку на удалённый Mongo
+     * под потоком ходов. Потеря промежуточных ходов в Mongo при краше безопасна: авторитет — Redis,
+     * а итог партии фиксируется в Mongo при finish.
+     */
+    const writeBehind = (state) => {
+        const id = String(state.id);
+        pendingWrite.set(id, {
+            fen: state.chess.fen(), moves: movesOf(state.chess), sanMoves: state.chess.history(),
+            clock: state.clock.toDocument(), drawOfferBy: state.drawOfferBy,
+        });
+        if (!writeTimers.has(id)) writeTimers.set(id, setTimer(() => flushWrite(id), writeBehindMs));
+    };
+
+    const persistMove = async (state, plyBefore, uci, san) => {
+        if (isClustered) {
+            // Авторитет — Redis (быстро, локально); Mongo догоняет асинхронно
+            await redis.saveState(state.id, serialize(state));
+            writeBehind(state);
+            return;
+        }
+        const res = await LiveGame.updateOne(
+            { _id: state.id, status: 'active', moves: { $size: plyBefore } },
+            {
+                $push: { moves: uci, sanMoves: san },
+                $set: { fen: state.chess.fen(), clock: state.clock.toDocument(), drawOfferBy: state.drawOfferBy },
+            },
+        );
+        if (res.matchedCount === 0) throw conflict('The game state changed. Reload the game.', 'GAME_STATE_CONFLICT');
+    };
+
     // ------------------------------------------------------------ действия игроков
 
     const requirePlayer = async (gameId, userId) => {
@@ -261,17 +382,6 @@ const createGameManager = ({
         const color = uid === state.white ? 'white' : uid === state.black ? 'black' : null;
         if (!color) throw forbidden('You are not a player in this game.', 'NOT_A_PLAYER');
         return { state, color };
-    };
-
-    const persistMove = async (state, plyBefore, uci, san) => {
-        const res = await LiveGame.updateOne(
-            { _id: state.id, status: 'active', moves: { $size: plyBefore } },
-            {
-                $push: { moves: uci, sanMoves: san },
-                $set: { fen: state.chess.fen(), clock: state.clock.toDocument(), drawOfferBy: state.drawOfferBy },
-            },
-        );
-        if (res.matchedCount === 0) throw conflict('The game state changed. Reload the game.', 'GAME_STATE_CONFLICT');
     };
 
     /** Ход игрока (uci: e2e4, e7e8q). expectedPly — защита от устаревшего клиента */
@@ -310,7 +420,7 @@ const createGameManager = ({
             await persistMove(state, plyBefore, normalized, played.san);
         } catch (e) {
             state.chess.undo();
-            games.delete(state.id); // перечитать из БД при следующем обращении
+            games.delete(state.id); // перечитать из источника при следующем обращении
             throw e;
         }
 
@@ -336,6 +446,11 @@ const createGameManager = ({
         return finish(state, { winner: null, reason: 'aborted', aborted: true });
     });
 
+    const persistSideEffect = async (state, set) => {
+        if (isClustered) { await redis.saveState(state.id, serialize(state)); return; }
+        await LiveGame.updateOne({ _id: state.id, status: 'active' }, { $set: set });
+    };
+
     const offerDraw = (gameId, userId) => withLock(gameId, async () => {
         const { state, color } = await requirePlayer(gameId, userId);
         if (ply(state) < 2) throw conflict('Draw offers are available after the first moves.', 'DRAW_NOT_ALLOWED');
@@ -343,7 +458,7 @@ const createGameManager = ({
         if (state.drawOfferBy === opposite(color)) return finish(state, { winner: 'draw', reason: 'draw_agreement' });
         if (state.drawOfferBy === color) return { gameId: state.id, drawOfferBy: color };
         state.drawOfferBy = color;
-        await LiveGame.updateOne({ _id: state.id, status: 'active' }, { $set: { drawOfferBy: color } });
+        await persistSideEffect(state, { drawOfferBy: color });
         emitToGame(state.id, 'draw_offer', { gameId: state.id, by: color });
         return { gameId: state.id, drawOfferBy: color };
     });
@@ -353,7 +468,7 @@ const createGameManager = ({
         if (state.drawOfferBy !== opposite(color)) throw conflict('There is no draw offer from your opponent.', 'NO_DRAW_OFFER');
         if (accept) return finish(state, { winner: 'draw', reason: 'draw_agreement' });
         state.drawOfferBy = null;
-        await LiveGame.updateOne({ _id: state.id, status: 'active' }, { $set: { drawOfferBy: null } });
+        await persistSideEffect(state, { drawOfferBy: null });
         emitToGame(state.id, 'draw_declined', { gameId: state.id, by: color });
         return { gameId: state.id, drawOfferBy: null };
     });
@@ -386,7 +501,7 @@ const createGameManager = ({
             creatorColor: doc.creatorColor,
             createdBy: doc.createdBy,
             fen: state ? state.chess.fen() : fresh.fen,
-            moves: state ? state.chess.history({ verbose: true }).map((m) => `${m.from}${m.to}${m.promotion ?? ''}`) : fresh.moves,
+            moves: state ? movesOf(state.chess) : fresh.moves,
             sanMoves: state ? state.chess.history() : fresh.sanMoves,
             clock,
             drawOfferBy: state ? state.drawOfferBy : fresh.drawOfferBy,
@@ -402,7 +517,11 @@ const createGameManager = ({
 
     /** Остановить все таймеры (тесты, остановка сервера) */
     const shutdown = () => {
-        for (const state of games.values()) if (state.timer) clearTimer(state.timer);
+        for (const t of timers.values()) clearTimer(t);
+        for (const t of writeTimers.values()) clearTimer(t);
+        timers.clear();
+        writeTimers.clear();
+        pendingWrite.clear();
         games.clear();
     };
 

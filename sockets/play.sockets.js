@@ -19,24 +19,39 @@
 //   seek_state { seeking, timeControl? }
 
 const mongoose = require('mongoose');
+const i18next = require('i18next');
 const { verifyAccessToken } = require('../v2/utils/accessToken');
 const { ApiError, badRequest } = require('../v2/utils/apiError');
 const { getGameManager } = require('../v2/services/play');
 const { setPlayNamespace, gameRoom, userRoom } = require('../v2/services/play/playRealtime');
 
-const toAckError = (error) => {
-    if (error instanceof ApiError) return { msg: error.message, code: error.code };
+// Переводчик сокета: язык из accept-language рукопожатия (как у REST). Если i18next ещё
+// не инициализирован (например, в тестах без config/i18n), возвращаем исходный текст.
+const translatorFor = (socket) => {
+    const lng = socket.handshake && socket.handshake.headers && socket.handshake.headers['accept-language'];
+    const fixedT = i18next.getFixedT(lng || 'en');
+    return (key, defaultValue) => {
+        const translated = i18next.isInitialized ? fixedT(key, { defaultValue }) : undefined;
+        return translated || defaultValue;
+    };
+};
+
+const toAckError = (error, t) => {
+    if (error instanceof ApiError) {
+        return { msg: t(`api.errors.${error.code}`, error.message), code: error.code };
+    }
     console.error('Play socket error:', error);
-    return { msg: 'An unexpected server error occurred.', code: 'INTERNAL_ERROR' };
+    return { msg: t('api.errors.INTERNAL_ERROR', 'An unexpected server error occurred.'), code: 'INTERNAL_ERROR' };
 };
 
 const handle = (socket, event, fn) => {
+    const t = translatorFor(socket);
     socket.on(event, async (payload, ack) => {
         const reply = typeof ack === 'function' ? ack : () => {};
         try {
             reply({ ok: true, data: await fn(payload || {}) });
         } catch (error) {
-            reply({ ok: false, error: toAckError(error) });
+            reply({ ok: false, error: toAckError(error, t) });
         }
     });
 };
@@ -91,6 +106,16 @@ const initializePlaySocket = (io, services = {}) => {
         handle(socket, 'seek', (p) => matchmaking().seek(user, socket.id, p));
         handle(socket, 'cancel_seek', async () => matchmaking().cancel(user.id));
         handle(socket, 'rematch', (p) => challenges().rematch(user, gameIdOf(p)));
+
+        // Индикатор качества связи (как на Lichess): клиент меряет RTT по пустому ack
+        socket.on('latency_ping', (_payload, ack) => { if (typeof ack === 'function') ack(); });
+        // ...и делится измеренной задержкой с соперником/зрителями в комнате партии
+        socket.on('latency_report', (payload) => {
+            const ms = Number(payload && payload.ms);
+            const gameId = payload && payload.gameId;
+            if (!Number.isFinite(ms) || ms < 0 || typeof gameId !== 'string') return;
+            socket.to(gameRoom(gameId)).emit('peer_lag', { userId: user.id, ms: Math.round(ms) });
+        });
 
         socket.on('disconnect', () => {
             // Последняя вкладка ушла — убрать из очереди автоподбора

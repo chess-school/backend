@@ -1,3 +1,10 @@
 /node_modules
 /functions
 .env
+# Локальные env и бэкапы — не коммитить (могут содержать секреты)
+.env.*
+!.env.example
+*.bak
+*.bak.*
+# Firebase service account (секрет — не коммитить, грузится через FIREBASE_CREDENTIALS_PATH)
+chess-online-bca59-firebase-adminsdk-*.json

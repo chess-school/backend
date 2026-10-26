@@ -9,31 +9,31 @@ module.exports = async function (req, res, next) {
     try {
         const authHeader = req.headers.authorization;
         if (!authHeader) {
-            return res.status(401).json({ message: "Токен не передан, доступ запрещён" });
+            return res.status(401).json({ message: req.t('api.auth.tokenNotProvided') });
         }
 
         const token = authHeader.split(' ')[1];
         if (!token) {
-            return res.status(401).json({ message: "Токен отсутствует, доступ запрещён" });
+            return res.status(401).json({ message: req.t('api.auth.tokenMissing') });
         }
 
         const decodedData = jwt.verify(token, process.env.JWT_SECRET);
-        
+
         const userFromDb = await User.findById(decodedData.id).select('sessionTokenVersion');
 
         if (!userFromDb) {
-            return res.status(401).json({ message: "Пользователь не найден, доступ запрещён" });
+            return res.status(401).json({ message: req.t('api.auth.userNotFoundAuth') });
         }
 
         if (userFromDb.sessionTokenVersion !== decodedData.sessionTokenVersion) {
-            return res.status(401).json({ message: "Сессия истекла. Пожалуйста, войдите снова." });
+            return res.status(401).json({ message: req.t('api.auth.sessionExpired') });
         }
-        
-        req.user = decodedData; 
+
+        req.user = decodedData;
         next();
 
     } catch (e) {
         console.error("Ошибка авторизации:", e.message);
-        return res.status(401).json({ message: "Неверный токен, доступ запрещён" });
+        return res.status(401).json({ message: req.t('api.auth.invalidTokenAuth') });
     }
 };

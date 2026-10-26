@@ -23,12 +23,12 @@ class PlayerController {
     try {
       const player = await PlayerModel.findOne({ user: playerId }).populate('user', '-password');
       if (!player) {
-        return res.status(404).json({ message: 'Игрок не найден' });
+        return res.status(404).json({ message: req.t('controllers.player.notFound') });
       }
       res.json(player);
     } catch (error) {
       console.error('Ошибка при получении игрока:', error);
-      res.status(500).json({ error: 'Ошибка при получении игрока' });
+      res.status(500).json({ error: req.t('controllers.player.getError') });
     }
   }
   
@@ -37,11 +37,11 @@ class PlayerController {
     try {
       const player = await PlayerModel.findById(playerId);
       if (!player || !player[format]) {
-        return res.status(404).json({ message: `Формат "${format}" не найден` });
+        return res.status(404).json({ message: req.t('controllers.player.formatNotFound', { format }) });
       }
       res.json({ rating: player[format].rating });
     } catch (error) {
-      res.status(500).json({ error: 'Ошибка при получении рейтинга' });
+      res.status(500).json({ error: req.t('controllers.player.ratingGetError') });
     }
   }
 
@@ -53,10 +53,15 @@ class PlayerController {
       const opponent = await PlayerModel.findById(opponentId);
 
       if (!player || !player[format]) {
-        return res.status(404).json({ message: `Формат "${format}" не найден для игрока` });
+        return res.status(404).json({ message: req.t('controllers.player.formatNotFoundForPlayer', { format }) });
       }
       if (!opponent || !opponent[format]) {
-        return res.status(404).json({ message: `Формат "${format}" не найден для соперника` });
+        return res.status(404).json({ message: req.t('controllers.player.formatNotFoundForOpponent', { format }) });
+      }
+
+      // Только владелец профиля может отправлять результат своей партии (защита от подмены рейтинга)
+      if (!req.user || String(player.user) !== String(req.user.id)) {
+        return res.status(403).json({ message: 'You can only report results for your own games.' });
       }
 
       const playerData = player[format];
@@ -89,7 +94,7 @@ class PlayerController {
       await opponent.save();
 
       res.json({
-        message: 'Рейтинги обновлены',
+        message: req.t('controllers.player.ratingsUpdated'),
         player: {
           newRating: playerNewRating,
           stats: playerData
@@ -100,7 +105,7 @@ class PlayerController {
         }
       });
     } catch (error) {
-      res.status(500).json({ error: 'Ошибка при обновлении рейтинга' });
+      res.status(500).json({ error: req.t('controllers.player.ratingUpdateError') });
     }
   }
 
@@ -110,7 +115,7 @@ class PlayerController {
       const games = await GameModel.find({ 'players.player': playerId }).populate('players.player', 'user');
       res.json(games);
     } catch (error) {
-      res.status(500).json({ error: 'Ошибка при получении игр' });
+      res.status(500).json({ error: req.t('controllers.player.gamesGetError') });
     }
   }
 
@@ -119,13 +124,13 @@ class PlayerController {
     try {
       const player = await PlayerModel.findById(playerId);
       if (!player) {
-        return res.status(404).json({ message: 'Игрок не найден' });
+        return res.status(404).json({ message: req.t('controllers.player.notFound') });
       }
       player.activeGame = gameId;
       await player.save();
-      res.json({ message: 'Активная игра установлена' });
+      res.json({ message: req.t('controllers.player.activeGameSet') });
     } catch (error) {
-      res.status(500).json({ error: 'Ошибка при установке активной игры' });
+      res.status(500).json({ error: req.t('controllers.player.activeGameSetError') });
     }
   }
 
@@ -134,13 +139,13 @@ class PlayerController {
     try {
       const player = await PlayerModel.findById(playerId);
       if (!player) {
-        return res.status(404).json({ message: 'Игрок не найден' });
+        return res.status(404).json({ message: req.t('controllers.player.notFound') });
       }
       player.activeGame = null;
       await player.save();
-      res.json({ message: 'Активная игра завершена' });
+      res.json({ message: req.t('controllers.player.activeGameFinished') });
     } catch (error) {
-      res.status(500).json({ error: 'Ошибка при завершении активной игры' });
+      res.status(500).json({ error: req.t('controllers.player.activeGameFinishError') });
     }
   }
 }

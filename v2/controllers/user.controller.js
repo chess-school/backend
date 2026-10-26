@@ -1,6 +1,32 @@
 const User = require('../models/User'); // Пути ../models/ должны быть правильными
 const mongoose = require('mongoose');
 
+// Белый список хостов, на которые разрешено делать редирект аватаром.
+// ui-avatars.com — дефолтные аватары (см. auth.controller.js), остальные — наши CDN.
+const ALLOWED_AVATAR_HOSTS = new Set([
+    'ui-avatars.com',
+]);
+
+// Проверяем, что URL — абсолютный https и его хост в белом списке.
+// Защита от open redirect: пользователь задаёт avatarUrl сам.
+const isAllowedAvatarUrl = (rawUrl) => {
+    if (typeof rawUrl !== 'string' || !rawUrl.startsWith('https://')) {
+        return false;
+    }
+    try {
+        const { protocol, hostname } = new URL(rawUrl);
+        return protocol === 'https:' && ALLOWED_AVATAR_HOSTS.has(hostname.toLowerCase());
+    } catch (e) {
+        return false;
+    }
+};
+
+// Дефолтный аватар на лету (тот же сервис, что и при регистрации в auth.controller.js).
+const buildDefaultAvatarUrl = (user) => {
+    const avatarName = `${user.firstName || ''}+${user.lastName || ''}`;
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(avatarName)}&background=random&color=fff`;
+};
+
 /**
  * @desc    Получение профиля текущего пользователя
  * @route   GET /api/v2/users/me
@@ -81,18 +107,20 @@ const updateMyAvatar = async (req, res) => {
 const getAvatarByUuid = async (req, res) => {
     const { uuid } = req.params;
 
-    // Ищем пользователя и получаем только URL его аватара
-    const user = await User.findOne({ uuid }).select('avatarUrl');
-    
-    if (!user || !user.avatarUrl) {
-        // Если у пользователя по какой-то причине нет аватара, 
-        // можно сгенерировать дефолтный на лету или вернуть 404.
+    // Ищем пользователя и получаем URL его аватара (+ имя для дефолтного аватара)
+    const user = await User.findOne({ uuid }).select('avatarUrl firstName lastName');
+
+    if (!user) {
         // Вернем 404, чтобы фронтенд показал свой плейсхолдер.
         return res.status(404).json({ msg: 'Avatar not found' });
     }
-    
+
+    // avatarUrl задаётся пользователем — редиректим только на доверенные хосты (защита от open redirect).
+    // Невалидный/сторонний URL заменяем на дефолтный аватар, а не раскрываем его.
+    const target = isAllowedAvatarUrl(user.avatarUrl) ? user.avatarUrl : buildDefaultAvatarUrl(user);
+
     // Вместо отправки данных, мы делаем перенаправление на внешний URL!
-    return res.redirect(302, user.avatarUrl);
+    return res.redirect(302, target);
 };
 
 

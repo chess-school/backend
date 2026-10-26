@@ -30,8 +30,11 @@ const getUsers = async (req, res) => {
         query.uuid = uuid;
     }
     if (email) {
+        // Экранируем спецсимволы regex и ограничиваем длину (защита от ReDoS),
+        // тот же подход, что в coach.controller.js (getCoaches).
+        const safeEmail = String(email).slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         // Используем case-insensitive regex для поиска по части email
-        query.email = { $regex: email, $options: 'i' };
+        query.email = { $regex: safeEmail, $options: 'i' };
     }
     if (role) {
         query.roles = role; // Ищет пользователей, у которых есть указанная роль в массиве
@@ -128,12 +131,13 @@ const verifyCoach = async (req, res) => {
         return res.status(404).json({ msg: 'User with this UUID not found.' });
     }
 
-    if (!user.roles.includes('COACH')) {
-        return res.status(400).json({ msg: 'Cannot verify: user does not have the COACH role.' });
+    // Верифицировать можно тренера ИЛИ админа (у админа может быть тренерский профиль без роли COACH).
+    if (!user.roles.includes('COACH') && !user.roles.includes('ADMIN')) {
+        return res.status(400).json({ msg: 'Cannot verify: user is neither a coach nor an admin.', code: 'NOT_COACH_OR_ADMIN' });
     }
 
     const coachProfile = await Coach.findOneAndUpdate(
-        { user: user._id }, 
+        { user: user._id },
         { isVerified: true },
         { new: true }
     );

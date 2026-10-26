@@ -18,6 +18,7 @@ const enrollmentController = require('../controllers/enrollment.controller');
 router.post(
     '/courses/:courseId/enroll',
     authMiddleware,
+    require('../middleware/resolveClubV2.middleware'),
     enrollmentController.enrollInCourse
 );
 
@@ -32,6 +33,7 @@ router.post(
 router.get(
     '/my-training/contracts',
     authMiddleware,
+    require('../middleware/resolveClubV2.middleware'),
     enrollmentController.getMyContracts
 );
 
@@ -47,7 +49,8 @@ router.get(
 router.get(
     '/coaches/me/students',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    require('../middleware/resolveClubV2.middleware'),
+    roleMiddleware(['COACH', 'ADMIN']),
     enrollmentController.getMyStudents
 );
 

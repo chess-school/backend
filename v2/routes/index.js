@@ -25,6 +25,7 @@ router.use('/users', userRoutes);
 router.use('/coaches', coachRoutes);
 router.use('/courses', courseRoutes);
 router.use('/groups', groupRoutes);
+router.use('/clubs', require('./club.routes'));
 router.use('/payments', paymentRoutes);
 router.use('/', enrollmentRoutes); 
 router.use('/schedule', scheduleRoutes);
@@ -37,6 +38,8 @@ router.use('/chessdb', chessDB);
 router.use('/digitizer', digitizerRoutes);
 router.use('/puzzle-books', puzzleBookRoutes);
 router.use('/students', studentRoutes);
+// Интерактивный класс: токены доступа к медиа-микросервису LiveKit (видео/аудио/экран)
+router.use('/classrooms', require('./classroom.routes'));
 // Онлайн-партии (лобби, вызовы); ходы и часы — socket.io namespace /play
 router.use('/play', require('./play.routes'));
 router.use('/assignments', homeworkRoutes.assignments);

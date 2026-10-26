@@ -106,7 +106,7 @@ router.put(
     coachController.updateCoachProfile
 );
 
-router.post('/auth/coaches-by-email', coachController.getCoachesByEmail);
+router.post('/auth/coaches-by-email', authMiddleware, coachController.getCoachesByEmail);
 
 router.get('/coach/:id', validateRequest(['id']), coachController.getCoachById);
 
@@ -188,13 +188,15 @@ router.get('/admin/user',
 );
 
 router.get('/admins',
+    authMiddleware,
+    roleMiddleware(['admin']),
     adminController.getAdmins
 );
 
-router.post('/save-game', 
-    authMiddleware, 
-    // roleMiddleware(['coach', 'admin']),
-    // validateRequest(['studentId', 'pgn']), 
+router.post('/save-game',
+    authMiddleware,
+    roleMiddleware(['coach', 'admin']),
+    validateRequest(['studentId', 'pgn']),
     savedGames.saveGameForStudent
 );
 

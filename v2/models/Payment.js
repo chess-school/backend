@@ -4,6 +4,8 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
 const PaymentSchema = new Schema({
+    // Клуб-владелец (мульти-арендность #7). Проставляется при создании из req.club.
+    club: { type: Schema.Types.ObjectId, ref: 'Club', index: true },
     // --- ВНУТРЕННИЕ СВЯЗИ В ВАШЕЙ СИСТЕМЕ ---
     user: { // Пользователь, который совершил платеж
         type: Schema.Types.ObjectId,

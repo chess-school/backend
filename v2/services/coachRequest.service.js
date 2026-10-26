@@ -9,6 +9,7 @@
 
 const User = require('../models/User');
 const Coach = require('../models/Coach');
+const Course = require('../models/Course');
 const TrainingContract = require('../models/TrainingContract');
 const CoachRequest = require('../models/CoachRequest');
 const Notification = require('../models/Notification');
@@ -42,7 +43,7 @@ const notify = (recipient, type, message, link) => Notification.create({ recipie
     .catch((e) => console.error('Coach request notification failed:', e.message));
 
 /** Ученик отправляет заявку тренеру (coachId — id профиля Coach) */
-const createRequest = async (user, coachId, { experience, goals }) => {
+const createRequest = async (user, coachId, { experience, goals }, club) => {
     const coach = await Coach.findOne({ _id: coachId, isVerified: true }).select('user').lean();
     if (!coach) throw notFound('Coach not found.', 'COACH_NOT_FOUND');
     if (String(coach.user) === String(user.id)) throw unprocessable('You cannot send a request to yourself.', 'SELF_REQUEST');
@@ -55,7 +56,7 @@ const createRequest = async (user, coachId, { experience, goals }) => {
 
     let request;
     try {
-        request = await CoachRequest.create({ student: user.id, coach: coach._id, experience, goals: goals || '' });
+        request = await CoachRequest.create({ student: user.id, coach: coach._id, experience, goals: goals || '', ...(club ? { club } : {}) });
     } catch (e) {
         if (e.code === 11000) throw conflict('You have already sent a request to this coach.', 'REQUEST_PENDING');
         throw e;
@@ -84,10 +85,12 @@ const coachScope = async (user) => {
 };
 
 /** Заявки тренеру; status — фильтр (по умолчанию все, рассматриваемые — первыми) */
-const listCoachRequests = async (user, { status } = {}) => {
+const listCoachRequests = async (user, { status } = {}, club) => {
     const coachId = await coachScope(user);
     // ADMIN видит заявки всех тренеров
     const filter = isAdmin(user) ? {} : { coach: coachId };
+    // Изоляция по клубу (#7): если активный клуб определён — только его заявки
+    if (club) filter.club = club;
     if (status) filter.status = status;
     const requests = await CoachRequest.find(filter)
         .sort({ createdAt: -1 })
@@ -98,9 +101,28 @@ const listCoachRequests = async (user, { status } = {}) => {
     return requests.sort((a, b) => order[a.status] - order[b.status]).map(toDto);
 };
 
+// Персональный курс тренера для заявок без явно выбранного курса.
+// Один на тренера (находим по автору+маркеру), чтобы не плодить дубли при каждом одобрении.
+const DEFAULT_COURSE_TITLE = 'Individual lessons';
+
+/** courseId из запроса, либо персональный курс тренера (найти-или-создать). Возвращает id курса. */
+const resolveCourseForApproval = async (coachId) => {
+    const existing = await Course.findOne({ authors: coachId, title: DEFAULT_COURSE_TITLE }).select('_id').lean();
+    if (existing) return existing._id;
+    const created = await Course.create({
+        title: DEFAULT_COURSE_TITLE,
+        description: 'Individual training sessions with your coach.',
+        authors: [coachId],
+        price: { amount: 0, currency: 'USD' },
+        status: 'draft',
+    });
+    return created._id;
+};
+
 /**
- * Решение по заявке. approved требует courseId: ученик записывается на этот курс тренера
- * (enrollStudent проверяет, что курс — его, и не даёт записать дважды).
+ * Решение по заявке. approved: ученик записывается на выбранный курс тренера, либо —
+ * если courseId не передан — на его персональный курс (создаётся при первом одобрении).
+ * enrollStudent проверяет, что курс — его, и не даёт записать дважды.
  */
 const decideRequest = async (user, requestId, { status, courseId }) => {
     const coachId = await coachScope(user);
@@ -113,9 +135,10 @@ const decideRequest = async (user, requestId, { status, courseId }) => {
     let enrollment = null;
     if (status === 'approved') {
         const scope = await studentService.resolveScope(user);
+        const effectiveCourseId = courseId || await resolveCourseForApproval(request.coach);
         // Админ одобряет от имени тренера заявки
-        await studentService.enrollStudent(scope, { userUuid: request.student.uuid, courseId, coachId: String(request.coach) });
-        const contract = await TrainingContract.findOne({ student: request.student._id, course: courseId }).select('_id').lean();
+        await studentService.enrollStudent(scope, { userUuid: request.student.uuid, courseId: effectiveCourseId, coachId: String(request.coach) });
+        const contract = await TrainingContract.findOne({ student: request.student._id, course: effectiveCourseId }).select('_id').lean();
         enrollment = contract ? contract._id : null;
     }
 

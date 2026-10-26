@@ -20,11 +20,12 @@ const createGroup = async (req, res) => {
         return res.status(403).json({ msg: 'You must have a coach profile to create groups.', code: 'COACH_PROFILE_REQUIRED' });
     }
 
-    // 2. Создаем группу
+    // 2. Создаем группу (в активном клубе — мульти-арендность #7)
     const group = new Group({
         name,
         description,
-        coach: coachProfile._id // Текущий тренер - владелец группы
+        coach: coachProfile._id, // Текущий тренер - владелец группы
+        ...(req.club ? { club: req.club } : {}),
     });
 
     await group.save();
@@ -43,7 +44,9 @@ const getMyGroups = async (req, res) => {
         return res.json({ data: [] });
     }
 
-    const groups = await Group.find({ coach: coachProfile._id })
+    // Изоляция по клубу (#7): если активный клуб определён — только его группы
+    const filter = { coach: coachProfile._id, ...(req.club ? { club: req.club } : {}) };
+    const groups = await Group.find(filter)
                               .populate('members', 'uuid firstName lastName avatarUrl')
                               .sort({ createdAt: -1 });
 

@@ -4,6 +4,8 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
 const ScheduleSchema = new Schema({
+    // Клуб-владелец (мульти-арендность #7). Проставляется при создании из req.club.
+    club: { type: Schema.Types.ObjectId, ref: 'Club', index: true },
     // --- ОБЩАЯ ИНФОРМАЦИЯ О СОБЫТИИ ---
     title: { type: String, required: true },
     description: { type: String, default: '' },

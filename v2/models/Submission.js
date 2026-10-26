@@ -3,6 +3,8 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
 const SubmissionSchema = new Schema({
+    // Клуб-владелец (мульти-арендность #7). Проставляется при создании из req.club (или наследуется от Assignment).
+    club: { type: Schema.Types.ObjectId, ref: 'Club', index: true },
     // На какое задание это ответ
     assignment: { type: Schema.Types.ObjectId, ref: 'Assignment', required: true },
     // Какой студент его сдал

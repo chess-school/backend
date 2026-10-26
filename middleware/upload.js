@@ -6,7 +6,10 @@ const fileFilter = (req, file, cb) => {
   if (file.mimetype.startsWith('image')) {
     cb(null, true);
   } else {
-    cb({ message: 'Неподдерживаемый формат файла. Пожалуйста, загружайте только изображения.', code: 'LIMIT_UNEXPECTED_FILE' }, false);
+    const message = req && req.t
+      ? req.t('controllers.upload.unsupportedFormat')
+      : 'Unsupported file format. Please upload images only.';
+    cb({ message, code: 'LIMIT_UNEXPECTED_FILE' }, false);
   }
 };
 

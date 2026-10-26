@@ -111,7 +111,7 @@ test('заявка: отправка, повтор — 409, себе — 422, н
     assert.ok(notified, 'тренер получил уведомление');
 });
 
-test('тренер видит только свои заявки; одобрение требует курс и записывает ученика', async () => {
+test('тренер видит только свои заявки; одобрение записывает ученика (выбранный курс или персональный)', async () => {
     const annaList = await call('GET', '/coaches/me/requests', 'Anna');
     assert.equal(annaList.data.data.length, 1);
     assert.equal(annaList.data.data[0].student.firstName, 'Ivan');
@@ -120,15 +120,14 @@ test('тренер видит только свои заявки; одобрен
 
     const id = annaList.data.data[0]._id;
     assert.equal((await call('PATCH', `/coaches/me/requests/${id}`, 'Boris', { status: 'rejected' })).status, 404, 'чужая заявка');
-    const noCourse = await call('PATCH', `/coaches/me/requests/${id}`, 'Anna', { status: 'approved' });
-    assert.equal(noCourse.status, 422);
-    assert.equal(noCourse.data.details[0].field, 'courseId');
 
+    // Явно выбранный курс — ученик записывается на него
     const approved = await call('PATCH', `/coaches/me/requests/${id}`, 'Anna', { status: 'approved', courseId: String(course._id) });
     assert.equal(approved.status, 200, JSON.stringify(approved.data));
     assert.equal(approved.data.data.status, 'approved');
     const contract = await models.TrainingContract.findOne({ student: users.Student.u._id, coach: anna._id }).lean();
     assert.ok(contract, 'создана запись на курс — ученик в «Моих учениках»');
+    assert.equal(String(contract.course), String(course._id));
     assert.equal(String(approved.data.data.enrollment), String(contract._id));
 
     const twice = await call('PATCH', `/coaches/me/requests/${id}`, 'Anna', { status: 'rejected' });
@@ -136,13 +135,25 @@ test('тренер видит только свои заявки; одобрен
     // Уже ученик — новая заявка тому же тренеру не нужна
     assert.equal((await call('POST', `/coaches/${anna._id}/requests`, 'Student', { experience: 'Advanced' })).data.code, 'ALREADY_STUDENT');
     assert.ok(await models.Notification.exists({ recipient: users.Student.u._id, type: 'COACH_REQUEST_DECIDED' }));
+
+    // Без courseId — ученик записывается на персональный курс тренера (создаётся автоматически)
+    assert.equal((await call('POST', `/coaches/${anna._id}/requests`, 'Admin', { experience: 'Advanced' })).status, 201);
+    const pending = (await call('GET', '/coaches/me/requests?status=pending', 'Anna')).data.data;
+    const adminReq = pending.find((r) => r.student.firstName === 'Root');
+    const auto = await call('PATCH', `/coaches/me/requests/${adminReq._id}`, 'Anna', { status: 'approved' });
+    assert.equal(auto.status, 200, JSON.stringify(auto.data));
+    const personal = await models.Course.findOne({ authors: anna._id, title: 'Individual lessons' }).lean();
+    assert.ok(personal, 'создан персональный курс тренера');
+    const adminContract = await models.TrainingContract.findOne({ student: users.Admin.u._id, coach: anna._id }).lean();
+    assert.ok(adminContract, 'ученик записан без выбора курса');
+    assert.equal(String(adminContract.course), String(personal._id), 'запись на персональный курс');
 });
 
 test('отклонение; админ видит заявки всех тренеров; повторная заявка после отказа разрешена', async () => {
     const sent = await call('POST', `/coaches/${boris._id}/requests`, 'Student', { experience: 'Beginner' });
     const rejected = await call('PATCH', `/coaches/me/requests/${sent.data.data._id}`, 'Boris', { status: 'rejected' });
     assert.equal(rejected.data.data.status, 'rejected');
-    assert.equal((await call('GET', '/coaches/me/requests', 'Admin')).data.data.length, 2);
+    assert.equal((await call('GET', '/coaches/me/requests', 'Admin')).data.data.length, 3);
     assert.equal((await call('GET', '/coaches/me/requests?status=pending', 'Admin')).data.data.length, 0);
     assert.equal((await call('POST', `/coaches/${boris._id}/requests`, 'Student', { experience: 'Beginner' })).status, 201);
 });

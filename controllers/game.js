@@ -9,7 +9,7 @@ class GameController {
       res.json(challenges);
     } catch (error) {
       console.error('Ошибка при получении списка вызовов:', error);
-      res.status(500).json({ message: 'Ошибка при получении списка вызовов' });
+      res.status(500).json({ message: req.t('controllers.game.challengesGetError') });
     }
   }
 
@@ -20,7 +20,7 @@ class GameController {
     try {
       const player = await PlayerModel.findById(playerId);
       if (!player) {
-        return res.status(404).json({ message: 'Игрок не найден' });
+        return res.status(404).json({ message: req.t('controllers.game.playerNotFound') });
       }
 
       const newGame = new GameModel({
@@ -37,7 +37,7 @@ class GameController {
       res.status(201).json(newGame);
     } catch (error) {
       console.error('Ошибка при создании вызова:', error);
-      res.status(500).json({ message: 'Ошибка при создании вызова' });
+      res.status(500).json({ message: req.t('controllers.game.challengeCreateError') });
     }
   }
 
@@ -49,22 +49,22 @@ class GameController {
     try {
       const game = await GameModel.findById(gameId);
       if (!game || game.status !== 'waiting') {
-        return res.status(404).json({ message: 'Вызов не доступен' });
+        return res.status(404).json({ message: req.t('controllers.game.challengeUnavailable') });
       }
 
       const player = await PlayerModel.findById(playerId);
       if (!player) {
-        return res.status(404).json({ message: 'Игрок не найден' });
+        return res.status(404).json({ message: req.t('controllers.game.playerNotFound') });
       }
 
       game.players.push({ player: playerId, color: 'black' }); // Добавляем второго игрока как черных
       game.status = 'in_progress'; // Игра начинается
       await game.save();
 
-      res.status(200).json({ message: 'Вызов принят', game });
+      res.status(200).json({ message: req.t('controllers.game.challengeAccepted'), game });
     } catch (error) {
       console.error('Ошибка при принятии вызова:', error);
-      res.status(500).json({ message: 'Ошибка при принятии вызова' });
+      res.status(500).json({ message: req.t('controllers.game.challengeAcceptError') });
     }
   }
 
@@ -76,7 +76,7 @@ class GameController {
     try {
       const game = await GameModel.findById(gameId);
       if (!game || game.status !== 'in_progress') {
-        return res.status(400).json({ message: 'Игра не найдена или завершена' });
+        return res.status(400).json({ message: req.t('controllers.game.gameNotFoundOrFinished') });
       }
 
       game.status = 'finished';
@@ -88,7 +88,7 @@ class GameController {
       res.status(200).json(game);
     } catch (error) {
       console.error('Ошибка при завершении игры:', error);
-      res.status(500).json({ message: 'Ошибка при завершении игры' });
+      res.status(500).json({ message: req.t('controllers.game.gameFinishError') });
     }
   }
 
@@ -98,12 +98,12 @@ class GameController {
     try {
       const game = await GameModel.findById(gameId).populate('players.player', '-password');
       if (!game) {
-        return res.status(404).json({ message: 'Игра не найдена' });
+        return res.status(404).json({ message: req.t('controllers.game.gameNotFound') });
       }
       res.status(200).json(game);
     } catch (error) {
       console.error('Ошибка при получении данных игры:', error);
-      res.status(500).json({ message: 'Ошибка при получении данных игры' });
+      res.status(500).json({ message: req.t('controllers.game.gameGetError') });
     }
   }
 }

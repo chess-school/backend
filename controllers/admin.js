@@ -30,7 +30,7 @@ const updateUserRole = async (req, res) => {
 // 🔁 2. Получить детали пользователя по ID
 const getUserDetails = async (req, res) => {
   const { t } = req;
-  const user = await User.findById(req.query.userId).select('+password');
+  const user = await User.findById(req.query.userId).select('-password');
   if (!user) {
     return res.status(404).json({ msg: t('api.admin.userNotFound') });
   }
@@ -39,7 +39,6 @@ const getUserDetails = async (req, res) => {
     firstName: user.firstName,
     lastName: user.lastName,
     email: user.email,
-    password: user.password,
     roles: user.roles,
     students: user.students,
     trainer: user.trainer,

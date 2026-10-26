@@ -55,9 +55,9 @@ const TestUserSchema = new mongoose.Schema({
         match: [/^\+[1-9]\d{7,14}$/, 'Phone must be in international format, e.g. +380501234567'],
     },
     emailVerified: {
-        type: Boolean, 
-        default: true 
-    }, 
+        type: Boolean,
+        default: false
+    },
     verificationToken: { 
         type: String,
     },
@@ -85,6 +85,10 @@ const TestUserSchema = new mongoose.Schema({
         rapid: { type: PerfSchema, default: () => ({}) },
         classical: { type: PerfSchema, default: () => ({}) },
     },
+
+    // Рейтинг решения задач (Elo, v2/utils/puzzleRatingCalculator.js) — Module 4
+    puzzleRating: { type: Number, default: 1500 },
+    puzzleRatingGames: { type: Number, default: 0 }, // число рейтинговых попыток
 
 }, {
     timestamps: true // Заменяем registrationDate на createdAt и updatedAt

@@ -36,7 +36,7 @@ const getOpeningBookByFen = async (req, res) => {
 
     } catch (err) {
         console.error("Ошибка в контроллере getOpeningBookByFen:", err.message);
-        res.status(500).json({ success: false, message: 'Ошибка сервера' });
+        res.status(500).json({ success: false, message: req.t('controllers.chessDB.serverError') });
     }
 };
 
@@ -48,7 +48,9 @@ const getOpeningBookByFen = async (req, res) => {
 const getPlayerGames = async (req, res) => {
     try {
         const playerName = req.params.name;
-        const playerRegex = new RegExp(playerName, 'i');
+        // Экранируем ввод и ограничиваем длину — защита от regex-инъекции / ReDoS
+        const safeName = String(playerName).slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const playerRegex = new RegExp(safeName, 'i');
         
         const games = await Game.find({
             $or: [
@@ -62,7 +64,7 @@ const getPlayerGames = async (req, res) => {
         res.status(200).json({ success: true, data: games });
     } catch (err) {
         console.error("Ошибка в контроллере getPlayerGames:", err.message);
-        res.status(500).json({ success: false, message: 'Ошибка сервера' });
+        res.status(500).json({ success: false, message: req.t('controllers.chessDB.serverError') });
     }
 };
 
@@ -105,7 +107,7 @@ const getGamesByPgnHistory = async (req, res) => {
 
     } catch (err) {
         console.error("Ошибка в контроллере getGamesByPgnHistory:", err.message);
-        res.status(500).json({ success: false, message: 'Ошибка сервера' });
+        res.status(500).json({ success: false, message: req.t('controllers.chessDB.serverError') });
     }
 };
 module.exports = {

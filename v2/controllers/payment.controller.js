@@ -23,7 +23,7 @@ const createCheckoutSession = async (req, res) => {
     }).populate('course');
 
     if (!contract || !contract.course) { // Добавили проверку на .course
-        return res.status(404).json({ msg: 'Contract or associated course not found, or contract already processed.' });
+        return res.status(404).json({ msg: req.t('controllers.payment.contractNotFound') });
     }
 
     // 2. Создаем сессию в Stripe
@@ -49,7 +49,9 @@ const createCheckoutSession = async (req, res) => {
             metadata: {
                 contractId: contract._id.toString(),
                 userId: userId.toString(),
-                courseId: contract.course._id.toString()
+                courseId: contract.course._id.toString(),
+                // Клуб-владелец (#7): переносим активный клуб запроса в Stripe, чтобы вебхук проставил его в Payment
+                ...(req.club ? { club: String(req.club) } : {}),
             },
             success_url: `${process.env.FRONTEND_BASE_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${process.env.FRONTEND_BASE_URL}/payment-cancelled`,
@@ -59,7 +61,7 @@ const createCheckoutSession = async (req, res) => {
 
     } catch (error) {
         console.error("Stripe session creation error:", error);
-        res.status(500).json({ msg: "Error creating payment session." });
+        res.status(500).json({ msg: req.t('controllers.payment.sessionError') });
     }
 };
 
@@ -89,7 +91,7 @@ const handleStripeWebhook = async (req, res) => {
 
         try {
             // 1. Получаем наши ID из метаданных, которые мы отправили ранее
-            const { contractId, userId } = session.metadata || {};
+            const { contractId, userId, club } = session.metadata || {};
             const contract = contractId ? await TrainingContract.findById(contractId) : null;
             if (!contract) {
                 // Повторять бессмысленно — отвечаем 200, чтобы Stripe не слал событие снова
@@ -113,6 +115,8 @@ const handleStripeWebhook = async (req, res) => {
                             paymentGateway: 'Stripe',
                             status: 'succeeded',
                             metadata: { checkoutSessionId: session.id },
+                            // Клуб-владелец (#7): из метаданных сессии, выставленных при создании checkout
+                            ...(club ? { club } : {}),
                         },
                     },
                     { upsert: true, runValidators: true },

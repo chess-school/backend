@@ -4,6 +4,7 @@ const Group = require('../models/Group');
 const User = require('../models/User');
 const TrainingContract = require('../models/TrainingContract');
 const Assignment = require('../models/Assignment');
+const { notifyLessonScheduled } = require('../services/lessonNotify.service');
 
 // Индивидуальное занятие можно назначить только по действующей записи студента у этого тренера
 const LIVE_CONTRACT_STATUSES = ['pending_payment', 'pending_approval', 'active'];
@@ -14,7 +15,7 @@ const UPDATABLE_EVENT_FIELDS = ['title', 'description', 'date', 'durationMinutes
 const requireCoach = async (req, res) => {
     const coachProfile = await Coach.findOne({ user: req.user.id }).select('_id');
     if (!coachProfile) {
-        res.status(403).json({ msg: 'You must have a coach profile to manage the schedule.', code: 'COACH_PROFILE_REQUIRED' });
+        res.status(403).json({ msg: req.t('controllers.schedule.coachProfileRequired'), code: 'COACH_PROFILE_REQUIRED' });
     }
     return coachProfile;
 };
@@ -25,36 +26,41 @@ const requireCoach = async (req, res) => {
  * @access  Private (role: COACH)
  */
 const createScheduleEvent = async (req, res) => {
-    // Поля уже провалидированы в schedule.routes.js
-    const { title, description, date, durationMinutes, link, eventType, contextId } = req.body;
+    // Поля уже провалидированы в schedule.routes.js. notify (по умолчанию true) и message — опциональные:
+    // уведомить адресатов (почта + колокольчик) и приложить личное сообщение тренера.
+    const { title, description, date, durationMinutes, link, eventType, contextId, message, personalMessages } = req.body;
+    const notify = req.body.notify !== false; // по умолчанию уведомляем
 
     const coachProfile = await requireCoach(req, res);
     if (!coachProfile) return;
 
     const context = { type: eventType, refId: contextId };
     let contract;
+    let recipients = []; // кого уведомлять: [{ _id, firstName, lastName, email }]
 
     // Проверка существования контекста и прав доступа
     if (eventType === 'individual') {
-        const student = await User.findById(contextId).select('_id');
-        if (!student) return res.status(404).json({ msg: 'Student not found.', code: 'STUDENT_NOT_FOUND' });
+        const student = await User.findById(contextId).select('_id firstName lastName email');
+        if (!student) return res.status(404).json({ msg: req.t('controllers.schedule.studentNotFound'), code: 'STUDENT_NOT_FOUND' });
         contract = await TrainingContract.findOne({
             student: student._id,
             coach: coachProfile._id,
             status: { $in: LIVE_CONTRACT_STATUSES },
         }).sort({ createdAt: -1 }).select('_id');
         if (!contract) {
-            return res.status(403).json({ msg: 'This user is not enrolled as your student.', code: 'NOT_YOUR_STUDENT' });
+            return res.status(403).json({ msg: req.t('controllers.schedule.notYourStudent'), code: 'NOT_YOUR_STUDENT' });
         }
+        recipients = [student];
     } else {
-        const group = await Group.findById(contextId).select('coach status');
-        if (!group) return res.status(404).json({ msg: 'Group not found.', code: 'GROUP_NOT_FOUND' });
+        const group = await Group.findById(contextId).select('coach status members').populate('members', 'firstName lastName email');
+        if (!group) return res.status(404).json({ msg: req.t('controllers.schedule.groupNotFound'), code: 'GROUP_NOT_FOUND' });
         if (String(group.coach) !== String(coachProfile._id)) {
-            return res.status(403).json({ msg: 'You are not the owner of this group.', code: 'NOT_GROUP_OWNER' });
+            return res.status(403).json({ msg: req.t('controllers.schedule.notGroupOwner'), code: 'NOT_GROUP_OWNER' });
         }
         if (group.status !== 'active') {
-            return res.status(422).json({ msg: 'Cannot schedule lessons for an archived group.', code: 'GROUP_ARCHIVED' });
+            return res.status(422).json({ msg: req.t('controllers.schedule.groupArchived'), code: 'GROUP_ARCHIVED' });
         }
+        recipients = group.members || [];
     }
 
     const newEvent = await Schedule.create({
@@ -63,8 +69,29 @@ const createScheduleEvent = async (req, res) => {
         context,
         // Связь с записью студента: сколько занятий из пакета израсходовано, очистка при удалении записи
         contract: contract ? contract._id : undefined,
+        ...(req.club ? { club: req.club } : {}),
     });
-    res.status(201).json(newEvent);
+
+    // Уведомления (почта «от лица тренера» + колокольчик) — не блокируют и не роняют создание занятия
+    let notified = null;
+    if (notify && recipients.length) {
+        try {
+            const coachUser = await User.findById(req.user.id).select('firstName lastName email').lean();
+            notified = await notifyLessonScheduled({
+                event: newEvent,
+                coach: coachUser || {},
+                recipients,
+                type: eventType === 'group' ? 'NEW_GROUP_LESSON' : 'NEW_LESSON',
+                customMessage: typeof message === 'string' ? message.trim() : '',
+                personalMessages: personalMessages && typeof personalMessages === 'object' ? personalMessages : {},
+                baseUrl: process.env.FRONTEND_BASE_URL || '',
+            });
+        } catch (e) {
+            console.error('createScheduleEvent: ошибка рассылки уведомлений:', e.message);
+        }
+    }
+
+    res.status(201).json({ ...newEvent.toObject(), notified });
 };
 
 
@@ -94,6 +121,9 @@ const getMySchedule = async (req, res) => {
             ...(coachProfile ? [{ coach: coachProfile._id }] : [])
         ]
     };
+
+    // Изоляция по клубу (#7): если активный клуб определён — только его события
+    if (req.club) query.club = req.club;
 
     // Фильтр по датам: можно передать только одну границу
     if (startDate || endDate) {
@@ -136,7 +166,7 @@ const updateScheduleEvent = async (req, res) => {
         if (req.body[field] !== undefined) updateData[field] = req.body[field];
     }
     if (Object.keys(updateData).length === 0) {
-        return res.status(400).json({ msg: `Nothing to update. Allowed fields: ${UPDATABLE_EVENT_FIELDS.join(', ')}`, code: 'EMPTY_UPDATE' });
+        return res.status(400).json({ msg: req.t('controllers.schedule.nothingToUpdate', { fields: UPDATABLE_EVENT_FIELDS.join(', ') }), code: 'EMPTY_UPDATE' });
     }
 
     // Находим и обновляем, только если я - тренер этого события
@@ -147,7 +177,7 @@ const updateScheduleEvent = async (req, res) => {
     );
 
     if (!updatedEvent) {
-        return res.status(404).json({ msg: 'Event not found or you are not authorized to edit it.', code: 'EVENT_NOT_FOUND' });
+        return res.status(404).json({ msg: req.t('controllers.schedule.eventNotFoundOrNotEditable'), code: 'EVENT_NOT_FOUND' });
     }
 
     res.json(updatedEvent);
@@ -166,12 +196,12 @@ const deleteScheduleEvent = async (req, res) => {
     const result = await Schedule.findOneAndDelete({ _id: eventId, coach: coachProfile._id });
 
     if (!result) {
-        return res.status(404).json({ msg: 'Event not found or you are not authorized to delete it.', code: 'EVENT_NOT_FOUND' });
+        return res.status(404).json({ msg: req.t('controllers.schedule.eventNotFoundOrNotDeletable'), code: 'EVENT_NOT_FOUND' });
     }
     // ДЗ занятия остаётся (по нему могли уже сдать работы), но больше не ссылается на удалённое занятие
     await Assignment.updateMany({ schedule: result._id }, { $unset: { schedule: 1 } });
 
-    res.json({ msg: 'Event deleted successfully.' });
+    res.json({ msg: req.t('controllers.schedule.eventDeletedSuccess') });
 };
 
 

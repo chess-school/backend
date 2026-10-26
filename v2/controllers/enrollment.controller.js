@@ -46,6 +46,8 @@ const enrollInCourse = async (req, res) => {
         status: isFree ? 'active' : 'pending_payment',
         startDate: isFree ? new Date() : undefined,
         priceAtPurchase: course.price, // Фиксируем цену на момент покупки
+        // Клуб-владелец (#7): предпочитаем клуб курса, иначе — активный клуб запроса
+        ...(course.club ? { club: course.club } : (req.club ? { club: req.club } : {})),
         // packageSnapshot можно будет заполнить из данных курса
     });
 
@@ -75,7 +77,8 @@ const enrollInCourse = async (req, res) => {
  * @access  Private
  */
 const getMyContracts = async (req, res) => {
-    const contracts = await TrainingContract.find({ student: req.user.id })
+    // Изоляция по клубу (#7): если активный клуб определён — только контракты этого клуба
+    const contracts = await TrainingContract.find({ student: req.user.id, ...(req.club ? { club: req.club } : {}) })
         .populate({
             path: 'course',
             select: 'title description thumbnailUrl language'
@@ -110,7 +113,8 @@ const getMyStudents = async (req, res) => {
     }
     
     // 2. Находим все контракты, где этот тренер является куратором
-    const contracts = await TrainingContract.find({ coach: coachProfile._id })
+    // Изоляция по клубу (#7): если активный клуб определён — только контракты этого клуба
+    const contracts = await TrainingContract.find({ coach: coachProfile._id, ...(req.club ? { club: req.club } : {}) })
         .populate({
             path: 'student',
             select: 'uuid firstName lastName email avatarUrl'

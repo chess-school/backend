@@ -17,6 +17,7 @@ const Group = require('../models/Group');
 const Coach = require('../models/Coach');
 const TrainingContract = require('../models/TrainingContract');
 const Notification = require('../models/Notification');
+const PuzzleBook = require('../models/PuzzleBook');
 const { forbidden, notFound, conflict, unprocessable } = require('../utils/apiError');
 
 const SUBMISSION_FIELDS = 'assignment student contentText attachment.contentType attachment.size attachment.filename status review submittedAt createdAt updatedAt';
@@ -83,7 +84,7 @@ const toSubmissionDto = (s) => s && ({
  * Создаёт ДЗ к занятию. Адресат берётся из занятия: индивидуальное -> студент, групповое -> группа.
  * payload: { scheduleId, title?, description, dueDate? }
  */
-const createAssignment = async (user, payload) => {
+const createAssignment = async (user, payload, club) => {
     const coachId = await requireCoachId(user);
     const lesson = await Schedule.findById(payload.scheduleId).select('coach context title').lean();
     if (!lesson) throw notFound('Lesson not found.', 'LESSON_NOT_FOUND');
@@ -101,6 +102,7 @@ const createAssignment = async (user, payload) => {
             context: { type: contextType, refId: lesson.context.refId },
             schedule: lesson._id,
             dueDate: payload.dueDate,
+            ...(club ? { club } : {}),
         });
     } catch (e) {
         if (e.code === 11000) throw conflict('This lesson already has homework. Edit it instead.', 'HOMEWORK_EXISTS');
@@ -120,10 +122,57 @@ const createAssignment = async (user, payload) => {
     return assignment.toObject();
 };
 
-/** ДЗ тренера; filters: { scheduleId } */
-const listCoachAssignments = async (user, filters) => {
+/**
+ * Создаёт ДЗ типа «решать задачи из задачника» — не привязано к занятию, адресуется студенту или группе.
+ * payload: { contextType: 'student'|'group', contextRefId, puzzleBookId, title?, description?, puzzleTarget?, dueDate?, plan? }
+ */
+const createPuzzleAssignment = async (user, payload, club) => {
     const coachId = await requireCoachId(user);
-    const query = { author: coachId };
+    if (!['student', 'group'].includes(payload.contextType)) {
+        throw unprocessable('contextType must be student or group.', 'VALIDATION_ERROR');
+    }
+    const book = await PuzzleBook.findById(payload.puzzleBookId).select('title').lean();
+    if (!book) throw notFound('Puzzle book not found.', 'BOOK_NOT_FOUND');
+
+    const plan = Array.isArray(payload.plan)
+        ? payload.plan.filter((p) => p && p.date).map((p) => ({
+            date: new Date(p.date),
+            puzzleCount: Math.max(0, Math.round(Number(p.puzzleCount)) || 0),
+            note: String(p.note || '').slice(0, 500),
+        }))
+        : [];
+
+    const assignment = await Assignment.create({
+        title: payload.title || `Solve puzzles: ${book.title}`,
+        description: payload.description,
+        author: coachId,
+        context: { type: payload.contextType, refId: payload.contextRefId },
+        kind: 'puzzles',
+        puzzleBook: book._id,
+        puzzleTarget: Math.max(0, Math.round(Number(payload.puzzleTarget)) || 0),
+        dueDate: payload.dueDate,
+        plan,
+        ...(club ? { club } : {}),
+    });
+
+    // Уведомляем адресатов: ссылка ведёт прямо на решение задачника
+    const recipients = payload.contextType === 'student'
+        ? [payload.contextRefId]
+        : (await Group.findById(payload.contextRefId).select('members').lean())?.members || [];
+    await Promise.all(recipients.map((recipient) => notify({
+        recipient,
+        type: 'NEW_ASSIGNMENT',
+        message: `New homework: ${assignment.title}`,
+        metadata: { link: `/books/${book._id}/solve`, entity: { type: 'Assignment', id: assignment._id } },
+    })));
+    return assignment.toObject();
+};
+
+/** ДЗ тренера; filters: { scheduleId } */
+const listCoachAssignments = async (user, filters, club) => {
+    const coachId = await requireCoachId(user);
+    // Изоляция по клубу (#7): если активный клуб определён — только его ДЗ
+    const query = { author: coachId, ...(club ? { club } : {}) };
     if (filters.scheduleId) query.schedule = filters.scheduleId;
     return Assignment.find(query).sort({ createdAt: -1 }).limit(200).lean();
 };
@@ -162,9 +211,10 @@ const deleteAssignment = async (user, assignmentId) => {
 // =================================================================
 
 /** Сдачи по ДЗ тренера; filters: { status } (по умолчанию — ждут проверки) */
-const listSubmissionsForReview = async (user, filters) => {
+const listSubmissionsForReview = async (user, filters, club) => {
     const coachId = await requireCoachId(user);
-    const assignmentIds = await Assignment.find({ author: coachId }).distinct('_id');
+    // Изоляция по клубу (#7): если активный клуб определён — только ДЗ этого клуба
+    const assignmentIds = await Assignment.find({ author: coachId, ...(club ? { club } : {}) }).distinct('_id');
     const submissions = await Submission.find({ assignment: { $in: assignmentIds }, status: filters.status || 'submitted' })
         .select(SUBMISSION_FIELDS)
         .populate('student', 'uuid firstName lastName email')
@@ -212,6 +262,7 @@ const listMyAssignments = async (user) => {
     const audience = await studentAudience(user.id);
     const assignments = await Assignment.find(audience)
         .populate('schedule', 'title date')
+        .populate('puzzleBook', 'title')
         .sort({ dueDate: 1, createdAt: -1 })
         .limit(200)
         .lean();
@@ -225,6 +276,10 @@ const listMyAssignments = async (user) => {
         description: a.description || '',
         dueDate: a.dueDate || null,
         lesson: a.schedule ? { _id: a.schedule._id, title: a.schedule.title, date: a.schedule.date } : null,
+        kind: a.kind || 'generic',
+        puzzleBook: a.puzzleBook ? { _id: a.puzzleBook._id, title: a.puzzleBook.title } : null,
+        puzzleTarget: a.puzzleTarget || 0,
+        plan: (a.plan || []).map((p) => ({ date: p.date, puzzleCount: p.puzzleCount || 0, note: p.note || '' })),
         createdAt: a.createdAt,
         submission: toSubmissionDto(byAssignment.get(String(a._id))) || null,
     }));
@@ -234,8 +289,8 @@ const listMyAssignments = async (user) => {
  * Сдать или пересдать ДЗ. Пересдача возможна, пока работа не принята.
  * payload: { contentText? }, file: { buffer, mimetype, size, originalname }? (multer)
  */
-const submitAssignment = async (user, assignmentId, payload, file) => {
-    const assignment = await Assignment.findById(assignmentId).select('title author').lean();
+const submitAssignment = async (user, assignmentId, payload, file, club) => {
+    const assignment = await Assignment.findById(assignmentId).select('title author club').lean();
     // ДЗ, адресованное не этому студенту, для него не существует
     if (!assignment || !(await Assignment.exists({ _id: assignmentId, ...(await studentAudience(user.id)) }))) {
         throw notFound('Homework not found.', 'HOMEWORK_NOT_FOUND');
@@ -256,11 +311,13 @@ const submitAssignment = async (user, assignmentId, payload, file) => {
         update.attachment = { data: file.buffer, contentType: file.mimetype, size: file.size, filename: file.originalname };
     }
 
+    // Клуб сдачи (#7): наследуется от ДЗ, иначе — из активного клуба запроса
+    const submissionClub = assignment.club || club || null;
     let submission;
     try {
         submission = await Submission.findOneAndUpdate(
             { assignment: assignmentId, student: user.id, status: { $ne: 'approved' } },
-            { $set: update, $setOnInsert: { assignment: assignmentId, student: user.id } },
+            { $set: update, $setOnInsert: { assignment: assignmentId, student: user.id, ...(submissionClub ? { club: submissionClub } : {}) } },
             { new: true, upsert: true, runValidators: true, projection: SUBMISSION_FIELDS },
         );
     } catch (e) {
@@ -300,6 +357,7 @@ const getSubmissionAttachment = async (user, submissionId) => {
 
 module.exports = {
     createAssignment,
+    createPuzzleAssignment,
     listCoachAssignments,
     updateAssignment,
     deleteAssignment,

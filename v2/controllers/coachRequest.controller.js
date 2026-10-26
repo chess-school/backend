@@ -5,7 +5,7 @@ const service = require('../services/coachRequest.service');
 /** POST /api/v2/coaches/:coachId/requests — ученик отправляет заявку тренеру */
 const createRequest = async (req, res) => {
     const { experience, goals } = req.body;
-    res.status(201).json({ data: await service.createRequest(req.user, req.params.coachId, { experience, goals }) });
+    res.status(201).json({ data: await service.createRequest(req.user, req.params.coachId, { experience, goals }, req.club) });
 };
 
 /** GET /api/v2/coaches/requests/sent — мои отправленные заявки */
@@ -15,7 +15,7 @@ const listSentRequests = async (req, res) => {
 
 /** GET /api/v2/coaches/me/requests?status= — заявки мне как тренеру */
 const listCoachRequests = async (req, res) => {
-    res.json({ data: await service.listCoachRequests(req.user, { status: req.query.status }) });
+    res.json({ data: await service.listCoachRequests(req.user, { status: req.query.status }, req.club) });
 };
 
 /** PATCH /api/v2/coaches/me/requests/:requestId — { status: approved|rejected, courseId? } */

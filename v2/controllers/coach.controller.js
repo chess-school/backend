@@ -62,7 +62,7 @@ const upsertMyCoachProfile = async (req, res) => {
 
     const updatedProfile = await Coach.findOneAndUpdate(
         { user: userId },
-        { $set: coachProfileFields },
+        { $set: coachProfileFields, ...(req.club ? { $setOnInsert: { club: req.club } } : {}) },
         { new: true, upsert: true, setDefaultsOnInsert: true }
     );
     
@@ -100,7 +100,8 @@ const getCoaches = async (req, res) => {
     const { uuid, page = 1, limit = 10, q } = req.query;
     const lang = req.language || 'en';
 
-    const query = { isVerified: true };
+    // Изоляция по клубу (#7): каталог ограничиваем клубом ТОЛЬКО если активный клуб определён
+    const query = { isVerified: true, ...(req.club ? { club: req.club } : {}) };
     if (uuid) {
         const user = await User.findOne({ uuid }).select('_id');
         if (!user) return res.json(null);
@@ -153,8 +154,58 @@ const getCoaches = async (req, res) => {
 };
 
 
+/**
+ * @desc    Получить тренеров (пользователей) по списку email.
+ *          Используется на главной (блок тренеров) — подбирает карточки по заранее заданным email.
+ * @route   POST /api/v2/auth/coaches-by-email
+ * @access  Public
+ */
+const getCoachesByEmail = async (req, res) => {
+    const { emails } = req.body;
+
+    if (!Array.isArray(emails) || emails.length === 0) {
+        return res.status(400).json({ msg: 'Invalid email list' });
+    }
+
+    const users = await User.find({ email: { $in: emails } })
+        .select('firstName lastName email roles avatarUrl');
+
+    const formatted = users.map(user => ({
+        _id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        roles: user.roles,
+        photoUrl: user.avatarUrl || null,
+    }));
+
+    res.json(formatted);
+};
+
+
+/**
+ * @desc    Верифицировать СВОЙ профиль тренера. Для админа: он может подтвердить себя сам
+ *          (не завязано на uuid — по req.user.id), после чего профиль виден в каталоге.
+ * @route   PATCH /api/v2/coaches/me/verify
+ * @access  Private (role: ADMIN)
+ */
+const verifyMyCoachProfile = async (req, res) => {
+    const coachProfile = await Coach.findOneAndUpdate(
+        { user: req.user.id },
+        { isVerified: true },
+        { new: true }
+    );
+    if (!coachProfile) {
+        return res.status(404).json({ msg: 'Coach profile not found. Create it first.', code: 'COACH_PROFILE_REQUIRED' });
+    }
+    res.json(coachProfile);
+};
+
+
 module.exports = {
     upsertMyCoachProfile,
     getMyCoachProfile,
+    verifyMyCoachProfile,
     getCoaches,
+    getCoachesByEmail,
 };

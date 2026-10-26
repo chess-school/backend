@@ -26,7 +26,8 @@ const groupIdParam = param('groupId').isMongoId().withMessage('groupId must be a
 router.post(
     '/',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    require('../middleware/resolveClubV2.middleware'),
+    roleMiddleware(['COACH', 'ADMIN']),
     validate([
         body('name').isString().withMessage('name is required').bail().trim()
             .isLength({ min: 1, max: 100 }).withMessage('name must be 1–100 characters'),
@@ -59,7 +60,7 @@ router.get(
 router.post(
     '/:groupId/members',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    roleMiddleware(['COACH', 'ADMIN']),
     validate([groupIdParam, body('userUuid').isUUID().withMessage('userUuid must be a valid UUID')]),
     groupController.addMemberToGroup
 );
@@ -72,7 +73,7 @@ router.post(
 router.delete(
     '/:groupId/members/:userUuid',
     authMiddleware,
-    roleMiddleware(['COACH']),
+    roleMiddleware(['COACH', 'ADMIN']),
     validate([groupIdParam, param('userUuid').isUUID().withMessage('userUuid must be a valid UUID')]),
     groupController.removeMemberFromGroup
 );

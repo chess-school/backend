@@ -9,6 +9,7 @@ const puzzleBookController = require('../controllers/puzzleBook.controller');
 
 // Задачники из оцифрованных книг: решать может любой авторизованный, редактировать — COACH/ADMIN
 router.use(authMiddleware);
+router.use(require('../middleware/resolveClubV2.middleware'));
 
 /**
  * @route   GET /api/v2/puzzle-books
@@ -37,5 +38,17 @@ router.put(
     roleMiddleware(['COACH', 'ADMIN']),
     puzzleBookController.updateExercise
 );
+
+/**
+ * @route   POST /api/v2/puzzle-books/:bookId/attempts
+ * @desc    Зафиксировать попытку решения упражнения (ученик) — для статистики
+ */
+router.post('/:bookId/attempts', puzzleBookController.recordAttempt);
+
+/**
+ * @route   GET /api/v2/puzzle-books/:bookId/stats
+ * @desc    Статистика прогресса учеников по задачнику (тренер)
+ */
+router.get('/:bookId/stats', roleMiddleware(['COACH', 'ADMIN']), puzzleBookController.getBookStats);
 
 module.exports = withErrorHandling(router);

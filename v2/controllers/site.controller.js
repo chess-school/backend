@@ -96,4 +96,75 @@ const getSettings = async (req, res) => {
     res.json({ data: buildPublic(club, settings) });
 };
 
-module.exports = { getSettings, buildPublic, PLATFORM_DEFAULTS };
+// --- Редактирование настроек владельцем клуба (консоль) ------------------------------------------
+
+const SOCIAL_KEYS = ['facebook', 'instagram', 'twitter', 'youtube', 'telegram'];
+
+/** @route GET /api/v2/site/settings/admin — СЫРЫЕ сохранённые настройки активного клуба для формы.
+ *  Требует входа и активного клуба (resolveClub). Возвращает что реально лежит в БД (пустое = пустое),
+ *  плюс имя/цвет/лого клуба для предзаполнения. */
+const getAdminSettings = async (req, res) => {
+    const [club, s] = await Promise.all([
+        Club.findById(req.club).select('name slug logoUrl brand city').lean(),
+        SiteSettings.findOne({ club: req.club }).lean(),
+    ]);
+    res.json({
+        data: {
+            club: { name: club?.name || '', slug: club?.slug || '', primaryColor: club?.brand?.primaryColor || '#2B50E0', logoUrl: club?.logoUrl || '', city: club?.city || '' },
+            settings: s || null,
+        },
+    });
+};
+
+/** @route PATCH /api/v2/site/settings — сохранить настройки сайта активного клуба (только owner).
+ *  Цвет пишем в Club.brand.primaryColor (его читает публичная витрина), остальное — в SiteSettings. */
+const updateSettings = async (req, res) => {
+    const b = req.body || {};
+    const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined);
+
+    // Настройки сайта (upsert). undefined-поля не трогаем ($set только заданное).
+    const set = {};
+    if (b.siteName !== undefined) set.siteName = str(b.siteName, 120);
+    if (b.logoUrl !== undefined) set.logoUrl = str(b.logoUrl, 500);
+    if (b.tagline !== undefined) set.tagline = str(b.tagline, 200);
+    if (b.auth) {
+        if (b.auth.promoTitle !== undefined) set['auth.promoTitle'] = str(b.auth.promoTitle, 120);
+        if (b.auth.promoSubtitle !== undefined) set['auth.promoSubtitle'] = str(b.auth.promoSubtitle, 300);
+        if (b.auth.backgroundUrl !== undefined) set['auth.backgroundUrl'] = str(b.auth.backgroundUrl, 500);
+        if (b.auth.buttonColor !== undefined) set['auth.buttonColor'] = str(b.auth.buttonColor, 9);
+        if (Array.isArray(b.auth.facts)) {
+            set['auth.facts'] = b.auth.facts
+                .map((f) => ({ value: str(f?.value, 24) || '', label: str(f?.label, 48) || '' }))
+                .filter((f) => f.value || f.label)
+                .slice(0, 3);
+        }
+    }
+    if (b.footer) {
+        if (b.footer.text !== undefined) set['footer.text'] = str(b.footer.text, 300);
+        if (b.footer.legalName !== undefined) set['footer.legalName'] = str(b.footer.legalName, 120);
+    }
+    if (b.socials && typeof b.socials === 'object') {
+        for (const k of SOCIAL_KEYS) {
+            if (b.socials[k] !== undefined) set[`socials.${k}`] = str(b.socials[k], 300) || '';
+        }
+    }
+
+    const settings = await SiteSettings.findOneAndUpdate(
+        { club: req.club },
+        { $set: { club: req.club, ...set } },
+        { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true },
+    ).lean();
+
+    // Цвет бренда — в документ клуба (его читает публичная витрина и шапка)
+    let club;
+    if (typeof b.primaryColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(b.primaryColor.trim())) {
+        club = await Club.findByIdAndUpdate(req.club, { $set: { 'brand.primaryColor': b.primaryColor.trim() } }, { new: true })
+            .select('name slug logoUrl brand city').lean();
+    } else {
+        club = await Club.findById(req.club).select('name slug logoUrl brand city').lean();
+    }
+
+    res.json({ data: { settings, public: buildPublic(club, settings) } });
+};
+
+module.exports = { getSettings, getAdminSettings, updateSettings, buildPublic, PLATFORM_DEFAULTS };

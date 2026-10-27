@@ -26,6 +26,7 @@ router.use('/coaches', coachRoutes);
 router.use('/courses', courseRoutes);
 router.use('/groups', groupRoutes);
 router.use('/clubs', require('./club.routes'));
+router.use('/site', require('./site.routes'));
 router.use('/payments', paymentRoutes);
 router.use('/', enrollmentRoutes); 
 router.use('/schedule', scheduleRoutes);

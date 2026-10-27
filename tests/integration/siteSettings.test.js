@@ -130,3 +130,48 @@ test('свой X-Club-Id (участник) отдаёт настройки ег
     assert.equal(res.data.data.isClub, true);
     assert.equal(res.data.data.siteName, 'Chess Cocks');
 });
+
+test('admin GET: владелец видит сырые настройки своего клуба (пустые)', async () => {
+    const res = await call('GET', '/site/settings/admin', 'Stranger', null, clubs.cocks._id);
+    assert.equal(res.status, 200);
+    assert.equal(res.data.data.club.name, 'Chess Cocks');
+    assert.equal(res.data.data.settings, null, 'у клуба ещё нет сохранённых настроек');
+});
+
+test('PATCH: владелец сохраняет настройки; меняется публичная витрина и цвет', async () => {
+    const res = await call('PATCH', '/site/settings', 'Stranger', {
+        siteName: 'Chess Cocks Academy',
+        tagline: 'Szczecin chess for everyone',
+        primaryColor: '#DC2626',
+        auth: { promoTitle: 'Join us', facts: [{ value: '20', label: 'kids' }, { value: '', label: '' }] },
+        socials: { instagram: 'https://instagram.com/cocks', facebook: '' },
+    }, clubs.cocks._id);
+    assert.equal(res.status, 200);
+    assert.equal(res.data.data.public.siteName, 'Chess Cocks Academy');
+    assert.equal(res.data.data.public.primaryColor, '#DC2626');
+    assert.equal(res.data.data.public.auth.facts.length, 1, 'пустой факт отфильтрован');
+    assert.equal(res.data.data.public.socials.instagram, 'https://instagram.com/cocks');
+    assert.ok(!('facebook' in res.data.data.public.socials), 'пустая соцсеть не отдаётся');
+
+    // Публичный GET теперь отдаёт обновлённое
+    const pub = await call('GET', '/site/settings?slug=chess-cocks');
+    assert.equal(pub.data.data.siteName, 'Chess Cocks Academy');
+});
+
+test('PATCH изоляция: не-участник клуба → 403 NOT_CLUB_MEMBER (resolveClub)', async () => {
+    // Owner не состоит в Chess Cocks
+    const res = await call('PATCH', '/site/settings', 'Owner', { siteName: 'Hacked' }, clubs.cocks._id);
+    assert.equal(res.status, 403);
+    assert.equal(res.data.code, 'NOT_CLUB_MEMBER');
+});
+
+test('PATCH роль: участник-не-владелец → 403 NOT_CLUB_OWNER', async () => {
+    // Делаем Owner тренером (не владельцем) в Chess Cocks
+    await models.ClubMembership.create({ club: clubs.cocks._id, user: users.Owner.u._id, role: 'trainer', status: 'active' });
+    const res = await call('PATCH', '/site/settings', 'Owner', { siteName: 'Hacked' }, clubs.cocks._id);
+    assert.equal(res.status, 403);
+    assert.equal(res.data.code, 'NOT_CLUB_OWNER');
+    // И настройки не изменились
+    const pub = await call('GET', '/site/settings?slug=chess-cocks');
+    assert.equal(pub.data.data.siteName, 'Chess Cocks Academy');
+});

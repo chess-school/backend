@@ -1,7 +1,7 @@
 // v2/controllers/admin.controller.js
 
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
-const Coach = require('../models/Coach');
+const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 // const mongoose = require('mongoose');
 
 // =================================================================
@@ -38,7 +38,7 @@ const getUsers = async (req, res) => {
         
         // Получаем связанные данные для детального просмотра
         const user = users[0];
-        const coachProfile = await Coach.findOne({ user: user._id });
+        const coachProfile = await coachRepo.findByUser(user._id);
 
         return res.json({
             user: user,
@@ -84,11 +84,7 @@ const updateUserRoles = async (req, res) => {
     const nextRoles = [...new Set(roles)];
 
     if (nextRoles.includes('COACH')) {
-        await Coach.findOneAndUpdate(
-            { user: user._id },
-            { $setOnInsert: { user: user._id } },
-            { upsert: true }
-        );
+        await coachRepo.upsertByUser(user._id, { set: {} }); // гарантируем существование профиля
     }
 
     await userRepo.updateRoles(user._id, nextRoles);
@@ -119,11 +115,7 @@ const verifyCoach = async (req, res) => {
         return res.status(400).json({ msg: 'Cannot verify: user is neither a coach nor an admin.', code: 'NOT_COACH_OR_ADMIN' });
     }
 
-    const coachProfile = await Coach.findOneAndUpdate(
-        { user: user._id },
-        { isVerified: true },
-        { new: true }
-    );
+    const coachProfile = await coachRepo.setVerifiedByUser(user._id);
 
     if (!coachProfile) {
         return res.status(404).json({ msg: 'Coach profile not found for this user. Cannot verify.' });

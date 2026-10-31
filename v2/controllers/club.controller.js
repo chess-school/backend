@@ -5,7 +5,7 @@ const ClubMembership = require('../models/ClubMembership');
 const Group = require('../models/Group');
 const Schedule = require('../models/Schedule');
 const paymentRepo = require('../repositories/payment.repo');
-const Coach = require('../models/Coach');
+const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const { notFound } = require('../utils/apiError');
 
 const coachName = (coach) => {
@@ -116,7 +116,7 @@ const getBySlug = async (req, res) => {
 
     // Публичная витрина: тренеры клуба (верхнеуровнево) и число групп
     const [coachesRaw, groupsCount] = await Promise.all([
-        Coach.find({ club: club._id }).populate('user', 'firstName lastName avatarUrl').limit(12).lean(),
+        coachRepo.findByClubWithUser(club._id, 12), // джойн user — в шве (app-level)
         Group.countDocuments({ club: club._id }),
     ]);
     const coaches = coachesRaw.map((c) => ({

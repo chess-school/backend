@@ -1,7 +1,7 @@
 const Group = require('../models/Group');
-const Coach = require('../models/Coach');
+const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
-const TrainingContract = require('../models/TrainingContract');
+const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
 const { notify } = require('../services/notify');
 
 // Записи, по которым студент реально учится у тренера (отменённые/возвращённые не дают права на группу)
@@ -16,7 +16,7 @@ const createGroup = async (req, res) => {
     const { name, description } = req.body;
 
     // 1. Находим профиль тренера текущего пользователя
-    const coachProfile = await Coach.findOne({ user: req.user.id }).select('_id');
+    const coachProfile = await coachRepo.findByUser(req.user.id);
     if (!coachProfile) {
         return res.status(403).json({ msg: 'You must have a coach profile to create groups.', code: 'COACH_PROFILE_REQUIRED' });
     }
@@ -40,7 +40,7 @@ const createGroup = async (req, res) => {
  * @access  Private (role: COACH)
  */
 const getMyGroups = async (req, res) => {
-    const coachProfile = await Coach.findOne({ user: req.user.id }).select('_id');
+    const coachProfile = await coachRepo.findByUser(req.user.id);
     if (!coachProfile) {
         return res.json({ data: [] });
     }
@@ -86,7 +86,7 @@ const getGroupById = async (req, res) => {
 
 /** Профиль тренера и группа, которой он владеет; иначе — готовый ответ с ошибкой */
 const loadOwnGroup = async (req, res, groupId) => {
-    const coachProfile = await Coach.findOne({ user: req.user.id }).select('_id');
+    const coachProfile = await coachRepo.findByUser(req.user.id);
     if (!coachProfile) {
         res.status(403).json({ msg: 'Coach profile not found for the current user.', code: 'COACH_PROFILE_REQUIRED' });
         return {};
@@ -120,11 +120,11 @@ const addMemberToGroup = async (req, res) => {
     }
 
     // Студент должен учиться у этого тренера по действующей записи (не отменённой и не возвращённой)
-    const contract = await TrainingContract.findOne({
+    const contract = await contractRepo.findOne({
         student: studentToAdd._id,
         coach: coachProfile._id,
         status: { $in: LIVE_CONTRACT_STATUSES },
-    }).sort({ createdAt: -1 });
+    }, { sort: { createdAt: -1 } });
     if (!contract) {
         return res.status(403).json({ msg: 'This user is not enrolled as your student.', code: 'NOT_YOUR_STUDENT' });
     }
@@ -142,9 +142,9 @@ const addMemberToGroup = async (req, res) => {
     // Запись студента теперь относится к этой группе; из прежней группы (если была) он выходит,
     // только если его там не держит другая запись
     const previousGroup = contract.group;
-    await TrainingContract.updateOne({ _id: contract._id }, { $set: { group: group._id } });
+    await contractRepo.updateOne({ _id: contract._id }, { group: group._id });
     if (previousGroup && String(previousGroup) !== String(group._id)) {
-        const stillLinked = await TrainingContract.exists({ student: studentToAdd._id, group: previousGroup });
+        const stillLinked = await contractRepo.exists({ student: studentToAdd._id, group: previousGroup });
         if (!stillLinked) await Group.updateOne({ _id: previousGroup }, { $pull: { members: studentToAdd._id } });
     }
 
@@ -184,7 +184,7 @@ const removeMemberFromGroup = async (req, res) => {
         return res.status(404).json({ msg: 'This student is not a member of this group.', code: 'NOT_A_MEMBER' });
     }
     // Записи студента больше не ссылаются на группу, из которой он вышел
-    await TrainingContract.updateMany({ student: studentToRemove._id, group: group._id }, { $set: { group: null } });
+    await contractRepo.updateMany({ student: studentToRemove._id, group: group._id }, { group: null });
 
     res.json({ msg: 'Student successfully removed from the group.' });
 };

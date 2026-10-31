@@ -1,6 +1,6 @@
 // v2/controllers/coach.controller.js
 
-const Coach = require('../models/Coach');
+const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const translateService = require('../services/translate.service');
 const { createLocalizedDTO } = require('../utils/localization.util'); // <-- НАША НОВАЯ УТИЛИТА
@@ -60,12 +60,8 @@ const upsertMyCoachProfile = async (req, res) => {
         console.error("Auto-translation process failed:", error);
     }
 
-    const updatedProfile = await Coach.findOneAndUpdate(
-        { user: userId },
-        { $set: coachProfileFields, ...(req.club ? { $setOnInsert: { club: req.club } } : {}) },
-        { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
-    
+    const updatedProfile = await coachRepo.upsertByUser(userId, { set: coachProfileFields, club: req.club });
+
     res.json(updatedProfile);
 };
 
@@ -76,9 +72,8 @@ const upsertMyCoachProfile = async (req, res) => {
  * @access  Private (role: COACH)
  */
 const getMyCoachProfile = async (req, res) => {
-    const coachProfile = await Coach.findOne({ user: req.user.id })
-        .populate('user', ['firstName', 'lastName', 'uuid', 'avatarUrl']);
-    
+    const coachProfile = await coachRepo.findByUserWithUser(req.user.id);
+
     if (!coachProfile) {
         return res.status(404).json({ msg: 'Coach profile not found for this user. Please create one first.' });
     }
@@ -101,47 +96,39 @@ const getCoaches = async (req, res) => {
     const lang = req.language || 'en';
 
     // Изоляция по клубу (#7): каталог ограничиваем клубом ТОЛЬКО если активный клуб определён
-    const query = { isVerified: true, ...(req.club ? { club: req.club } : {}) };
+    const filter = { isVerified: true, ...(req.club ? { clubId: req.club } : {}) };
     if (uuid) {
         const user = await userRepo.findByUuid(uuid);
         if (!user) return res.json(null);
-        query.user = user._id;
+        filter.userIds = [user._id];
     } else if (q && q.trim()) {
         // Поиск по имени: «anna», «anna kow», «kowalska» (экранирование/regex — в шве)
         const words = q.trim().split(/\s+/).slice(0, 3);
         const users = await userRepo.findByNameWords(words, { limit: 200 });
-        query.user = { $in: users.map((u) => u._id) };
+        filter.userIds = users.map((u) => u._id);
     }
-    
-    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
-    
-    const coachesFromDB = await Coach.find(query)
-        .populate('user', ['uuid', 'firstName', 'lastName', 'avatarUrl'])
-        .select('-payoutInfo -__v') 
-        .sort({ 'platformRating.average': -1 })
-        .skip(skip)
-        .limit(parseInt(limit, 10));
 
-    const localizedCoaches = coachesFromDB.map(coach => {
-        const coachObject = coach.toObject();
-        
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+
+    // Джойн user и исключение payoutInfo + сортировка по platformRating.average — в шве (app-level).
+    const coachesFromDB = await coachRepo.findCatalog(filter, { skip, limit: parseInt(limit, 10) });
+
+    const localizedCoaches = coachesFromDB.map(coachObject => {
         const localizedProfile = createLocalizedDTO(
             coachObject,
             lang,
-            ['headline', 'bio', 'specializations'], 
-            ['fideProfile', 'platformRating']   
+            ['headline', 'bio', 'specializations'],
+            ['fideProfile', 'platformRating']
         );
-        
         localizedProfile.user = coachObject.user;
-        
         return localizedProfile;
     });
-    
+
     if (uuid) {
         return res.json(localizedCoaches[0] || null);
     }
-    
-    const totalCoaches = await Coach.countDocuments(query);
+
+    const totalCoaches = await coachRepo.countCatalog(filter);
     
     res.json({
         data: localizedCoaches,
@@ -189,11 +176,7 @@ const getCoachesByEmail = async (req, res) => {
  * @access  Private (role: ADMIN)
  */
 const verifyMyCoachProfile = async (req, res) => {
-    const coachProfile = await Coach.findOneAndUpdate(
-        { user: req.user.id },
-        { isVerified: true },
-        { new: true }
-    );
+    const coachProfile = await coachRepo.setVerifiedByUser(req.user.id);
     if (!coachProfile) {
         return res.status(404).json({ msg: 'Coach profile not found. Create it first.', code: 'COACH_PROFILE_REQUIRED' });
     }

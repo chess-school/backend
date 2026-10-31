@@ -125,11 +125,24 @@ async function findByClub(clubId) {
   return PaymentMongo.find({ club: clubId }).select('amount currency status').lean();
 }
 
+/** Удалить НЕуспешные платежи контракта (при удалении записи — успешные сохраняем). */
+async function deleteUnsucceededForContract(contractId) {
+  if (usePg()) {
+    const res = await prisma().payment.deleteMany({
+      where: { contractId: String(contractId), status: { not: 'succeeded' } },
+    });
+    return { deletedCount: res.count };
+  }
+  const res = await PaymentMongo.deleteMany({ contract: contractId, status: { $ne: 'succeeded' } });
+  return { deletedCount: res.deletedCount };
+}
+
 module.exports = {
   upsertStripePayment,
   findByContracts,
   existsSucceededForContract,
   findByClub,
+  deleteUnsucceededForContract,
   usePg,
   _pgRowToDoc: pgRowToDoc,
 };

@@ -1,9 +1,8 @@
 // v2/controllers/payment.controller.js
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const TrainingContract = require('../models/TrainingContract');
+const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const paymentRepo = require('../repositories/payment.repo');
-require('../models/Course'); // регистрирует модель для populate('course')
 const { notify } = require('../services/notify');
 
 /**
@@ -17,11 +16,11 @@ const createCheckoutSession = async (req, res) => {
     const userId = req.user.id;
 
     // 1. Находим контракт, убеждаемся, что он принадлежит пользователю и ожидает оплаты.
-    const contract = await TrainingContract.findOne({
+    const contract = await contractRepo.findOneWithCourse({
         _id: contractId,
         student: userId,
         status: 'pending_payment'
-    }).populate('course');
+    });
 
     if (!contract || !contract.course) { // Добавили проверку на .course
         return res.status(404).json({ msg: req.t('controllers.payment.contractNotFound') });
@@ -93,7 +92,7 @@ const handleStripeWebhook = async (req, res) => {
         try {
             // 1. Получаем наши ID из метаданных, которые мы отправили ранее
             const { contractId, userId, club } = session.metadata || {};
-            const contract = contractId ? await TrainingContract.findById(contractId) : null;
+            const contract = contractId ? await contractRepo.findById(contractId) : null;
             if (!contract) {
                 // Повторять бессмысленно — отвечаем 200, чтобы Stripe не слал событие снова
                 console.warn(`Contract with ID ${contractId} not found.`);
@@ -145,9 +144,9 @@ const handleStripeWebhook = async (req, res) => {
             if (!amountMatches) {
                 console.error(`Contract ${contractId}: paid ${paidAmount} ${paidCurrency}, expected ${expected.amount} ${expected.currency} — not activated.`);
             } else {
-                const activated = await TrainingContract.updateOne(
+                const activated = await contractRepo.updateOne(
                     { _id: contract._id, status: { $in: ['pending_payment', 'pending_approval'] } },
-                    { $set: { status: 'active', startDate: contract.startDate || new Date() } },
+                    { status: 'active', startDate: contract.startDate || new Date() },
                 );
                 if (activated.modifiedCount) {
                     console.log(`Contract ${contractId} activated.`);
@@ -172,7 +171,7 @@ const handleStripeWebhook = async (req, res) => {
         const session = event.data.object;
         const { contractId } = session.metadata || {};
         const contract = contractId
-            ? await TrainingContract.findById(contractId).select('student course').lean()
+            ? await contractRepo.findById(contractId)
             : null;
         if (contract) {
             await notify({

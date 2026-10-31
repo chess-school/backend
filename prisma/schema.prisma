@@ -153,3 +153,83 @@ model User {
   @@index([lastName, firstName]) // список/сортировка студентов (chat, admin)
   @@map("users")
 }
+
+// --- Домен 4: Coaching (v2 Coach + TrainingContract) ---
+// Coach — профиль тренера (1:1 к User). TrainingContract — запись ученика на курс.
+// Кросс-модельные ссылки (userId/courseId/groupId/clubId) БЕЗ Prisma-связей: Course/
+// Group/Club ещё в Mongo. Все джойны (user/course/group/payment) репозиторный шов
+// делает на уровне ПРИЛОЖЕНИЯ (через userRepo/paymentRepo/Mongo-модели) — это снимает
+// кросс-БД populate/$lookup и делает код storage-agnostic. PK = строка Mongo ObjectId.
+
+enum ContractStatus {
+  pending_payment
+  pending_approval
+  active
+  completed
+  cancelled
+  refunded
+}
+
+model Coach {
+  id     String  @id // Mongo ObjectId (hex)
+  clubId String? // → clubs.id (Club в Mongo)
+  userId String  @unique // → users.id (1:1)
+
+  // Локализованный публичный профиль {en, uk?, pl?} — JSON (в БД не фильтруется).
+  headline        Json? // LocalizedString
+  bio             Json? // LocalizedString
+  specializations Json? // LocalizedStringArray
+  fideProfile     Json? // { fideId, title, rating:{standard,rapid,blitz}, profileUrl }
+
+  isVerified Boolean @default(false)
+
+  // platformRating.average вынесен в КОЛОНКУ — по нему ORDER BY в каталоге тренеров.
+  platformRatingAverage Float @default(0)
+  platformRatingCount   Int   @default(0)
+
+  payoutInfo Json? // { provider, accountId, status } — приватное, select('-payoutInfo')
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clubId])
+  @@index([platformRatingAverage]) // сортировка каталога
+  @@map("coaches")
+}
+
+model TrainingContract {
+  id        String  @id // Mongo ObjectId (hex)
+  clubId    String? // → clubs.id
+  studentId String // → users.id
+  courseId  String // → courses.id (Course в Mongo)
+  coachId   String // → coaches.id
+  groupId   String? // → groups.id (Group в Mongo)
+
+  // Снимок цены на момент покупки (неизменяемый)
+  priceAmount   Int // minor units
+  priceCurrency String
+
+  // Снимок пакета — JSON { description, individualLessonsTotal, groupLessonsTotal }
+  packageSnapshot Json?
+
+  status ContractStatus @default(pending_payment)
+
+  // Прогресс (в БД не фильтруется/не сортируется — читается приложением)
+  progressCompletedLessons      String[] @default([]) // массив ObjectId-строк
+  progressLessonsCompletedCount Int      @default(0)
+  progressPercentage            Int      @default(0)
+
+  startDate DateTime?
+  endDate   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, courseId]) // запрет дублей записи
+  @@index([coachId, status])
+  @@index([courseId, status])
+  @@index([groupId])
+  @@index([studentId])
+  @@index([clubId])
+  @@map("trainingcontracts")
+}

@@ -8,9 +8,9 @@
 // Ошибки — ApiError -> { msg, code, details? } (errorHandlerV2).
 
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
-const Coach = require('../models/Coach');
+const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const Course = require('../models/Course');
-const TrainingContract = require('../models/TrainingContract');
+const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
 const CoachRequest = require('../models/CoachRequest');
 const { notify: emitNotification } = require('./notify');
 const studentService = require('./student.service');
@@ -43,11 +43,11 @@ const notify = (recipient, type, message, link) => emitNotification({ recipient,
 
 /** Ученик отправляет заявку тренеру (coachId — id профиля Coach) */
 const createRequest = async (user, coachId, { experience, goals }, club) => {
-    const coach = await Coach.findOne({ _id: coachId, isVerified: true }).select('user').lean();
-    if (!coach) throw notFound('Coach not found.', 'COACH_NOT_FOUND');
+    const coach = await coachRepo.findById(coachId);
+    if (!coach || !coach.isVerified) throw notFound('Coach not found.', 'COACH_NOT_FOUND');
     if (String(coach.user) === String(user.id)) throw unprocessable('You cannot send a request to yourself.', 'SELF_REQUEST');
 
-    const linked = await TrainingContract.exists({ student: user.id, coach: coach._id, status: { $in: LINKED_STATUSES } });
+    const linked = await contractRepo.exists({ student: user.id, coach: coach._id, status: { $in: LINKED_STATUSES } });
     if (linked) throw conflict('You are already a student of this coach.', 'ALREADY_STUDENT');
     if (await CoachRequest.exists({ student: user.id, coach: coach._id, status: 'pending' })) {
         throw conflict('You have already sent a request to this coach.', 'REQUEST_PENDING');
@@ -76,7 +76,7 @@ const listSentRequests = async (user) => {
 
 /** Профиль тренера текущего пользователя (ADMIN без профиля — null: видит всех) */
 const coachScope = async (user) => {
-    const coach = await Coach.findOne({ user: user.id }).select('_id').lean();
+    const coach = await coachRepo.findByUser(user.id);
     if (!coach && !isAdmin(user)) {
         throw forbidden('Create your coach profile (PUT /api/v2/coaches/me) first.', 'COACH_PROFILE_REQUIRED');
     }
@@ -137,7 +137,7 @@ const decideRequest = async (user, requestId, { status, courseId }) => {
         const effectiveCourseId = courseId || await resolveCourseForApproval(request.coach);
         // Админ одобряет от имени тренера заявки
         await studentService.enrollStudent(scope, { userUuid: request.student.uuid, courseId: effectiveCourseId, coachId: String(request.coach) });
-        const contract = await TrainingContract.findOne({ student: request.student._id, course: effectiveCourseId }).select('_id').lean();
+        const contract = await contractRepo.findOne({ student: request.student._id, course: effectiveCourseId });
         enrollment = contract ? contract._id : null;
     }
 

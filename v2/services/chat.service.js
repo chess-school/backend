@@ -10,8 +10,8 @@
 
 const mongoose = require('mongoose');
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
-const Coach = require('../models/Coach');
-const TrainingContract = require('../models/TrainingContract');
+const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
+const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
 const ChatRoom = require('../models/ChatRoom');
 const ChatMessage = require('../models/ChatMessage');
 const { badRequest, forbidden, notFound, unprocessable } = require('../utils/apiError');
@@ -34,17 +34,17 @@ const toId = (v) => String(v && v._id ? v._id : v);
 /** Пользователи, связанные с userId записью на курс: { userId: 'student' | 'coach' } (роль собеседника) */
 const relationsOf = async (userId) => {
     const relations = new Map();
-    const myCoach = await Coach.findOne({ user: userId }).select('_id').lean();
+    const myCoach = await coachRepo.findByUser(userId);
 
     const [asCoach, asStudent] = await Promise.all([
         myCoach
-            ? TrainingContract.find({ coach: myCoach._id, status: { $in: CHAT_STATUSES } }).distinct('student')
+            ? contractRepo.distinct('student', { coach: myCoach._id, status: { $in: CHAT_STATUSES } })
             : [],
-        TrainingContract.find({ student: userId, status: { $in: CHAT_STATUSES } }).distinct('coach'),
+        contractRepo.distinct('coach', { student: userId, status: { $in: CHAT_STATUSES } }),
     ]);
     for (const id of asCoach) relations.set(String(id), 'student');
     if (asStudent.length) {
-        const coaches = await Coach.find({ _id: { $in: asStudent } }).select('user').lean();
+        const coaches = await coachRepo.findByIds(asStudent);
         for (const c of coaches) if (!relations.has(String(c.user))) relations.set(String(c.user), 'coach');
     }
     relations.delete(String(userId));

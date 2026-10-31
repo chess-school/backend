@@ -1,0 +1,98 @@
+// Prisma schema — миграция MongoDB → PostgreSQL (strangler).
+// PK = строка Mongo ObjectId (hex) на время миграции: см. docs/postgres-migration/MIGRATION-PLAN.md
+// Модели добавляются ДОМЕН ЗА ДОМЕНОМ по мере переноса, начиная с Notification (пилот).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+// --- Домен 1 (пилот): Notification (v2 NotificationV2, коллекция notificationv2s) ---
+// PK = строка Mongo ObjectId. recipientId пока без FK (TestUser ещё в Mongo —
+// strangler). metadata.{link,entity} уплощены в колонки (это один вложенный
+// объект, не массив). FK на users добавим при переносе домена identity.
+
+enum NotificationType {
+  NEW_ASSIGNMENT
+  SUBMISSION_RECEIVED
+  SUBMISSION_REVIEWED
+  GROUP_INVITE
+  NEW_GROUP_LESSON
+  NEW_LESSON
+  LESSON_REMINDER
+  CONTRACT_APPROVED
+  COACH_REQUEST
+  COACH_REQUEST_DECIDED
+  PAYMENT_SUCCESSFUL
+  PAYMENT_FAILED
+  COACH_APPLICATION
+  COACH_APPLICATION_DECIDED
+  NEW_MESSAGE
+  SYSTEM_ANNOUNCEMENT
+}
+
+enum NotificationEntityType {
+  Course
+  Group
+  Assignment
+  User
+}
+
+model Notification {
+  id                 String                  @id // Mongo ObjectId (hex)
+  recipientId        String // → users.id (FK добавим в домене identity)
+  message            String
+  description        String?
+  type               NotificationType
+  read               Boolean                 @default(false)
+  metadataLink       String?
+  metadataEntityType NotificationEntityType?
+  metadataEntityId   String?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  @@index([recipientId, read])
+  @@map("notifications")
+}
+
+// --- Домен 2: Payment (v2 Payment, коллекция payments) ---
+// contractId/userId/clubId пока без FK (TrainingContract/User/Club ещё в Mongo).
+// Два уникальных ограничения повторяют Mongo: один платёж на контракт + уникальный
+// id транзакции шлюза (идемпотентность вебхука Stripe).
+
+enum PaymentGateway {
+  Stripe
+  PayPal
+  Manual
+}
+
+enum PaymentStatus {
+  pending
+  succeeded
+  failed
+}
+
+model Payment {
+  id                   String         @id // Mongo ObjectId (hex)
+  clubId               String? // → clubs.id
+  userId               String // → users.id
+  contractId           String         @unique // один платёж на контракт
+  amount               Int // в центах (min 0)
+  currency             String // ISO-4217, uppercase (3)
+  paymentGateway       PaymentGateway
+  gatewayTransactionId String         @unique
+  receiptUrl           String?
+  status               PaymentStatus
+  metadata             Json?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  @@index([userId])
+  @@index([clubId])
+  @@map("payments")
+}

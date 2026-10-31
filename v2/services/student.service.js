@@ -16,7 +16,7 @@ const Coach = require('../models/Coach');
 const Course = require('../models/Course');
 const Group = require('../models/Group');
 const TrainingContract = require('../models/TrainingContract');
-const Payment = require('../models/Payment');
+const paymentRepo = require('../repositories/payment.repo');
 const Submission = require('../models/Submission');
 const Assignment = require('../models/Assignment');
 const Schedule = require('../models/Schedule');
@@ -240,7 +240,7 @@ const getStudent = async (scope, uuid) => {
     const assignmentFilter = coachFilter.coach ? { author: coachFilter.coach } : null;
 
     const [payments, groups, assignmentIds] = await Promise.all([
-        Payment.find({ contract: { $in: contractIds } }).select('contract amount currency status createdAt').lean(),
+        paymentRepo.findByContracts(contractIds),
         Group.find(groupsFilter).select('name status coach').lean(),
         assignmentFilter ? Assignment.find(assignmentFilter).distinct('_id') : Promise.resolve(null),
     ]);
@@ -447,7 +447,7 @@ const deleteEnrollment = async (scope, uuid, contractId) => {
     requireCoachProfile(scope);
     const { student, contract } = await loadContractInScope(scope, uuid, contractId);
 
-    if (await Payment.exists({ contract: contract._id, status: 'succeeded' })) {
+    if (await paymentRepo.existsSucceededForContract(contract._id)) {
         throw conflict('The enrollment has a successful payment. Set its status to cancelled or refunded instead.', 'HAS_PAYMENTS');
     }
 

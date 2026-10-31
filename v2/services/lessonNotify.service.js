@@ -8,7 +8,7 @@
 // Персонализация: customMessage — общий текст для всех; personalMessages[userId] — личная приписка
 // конкретному адресату. В письме есть обращение по имени; оба текста показываются, если заданы.
 
-const Notification = require('../models/Notification');
+const { notify } = require('./notify');
 const { sendEmail } = require('../utils/email/email.service');
 
 const escapeHtml = (s = '') => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -69,7 +69,7 @@ const notifyLessonScheduled = async ({ event, coach, recipients, type, customMes
         // on-site: к базовому тексту добавляем личную приписку, иначе общую
         const extra = personal || common;
         const notifMessage = `Новое занятие «${event.title}» — ${dateText}. Тренер: ${coachName}.${extra ? ` ${extra}` : ''}`;
-        await Notification.create({ recipient: r._id, type, message: notifMessage, metadata: { link: path } });
+        await notify({ recipient: r._id, type, message: notifMessage, link: path });
 
         if (r.email) {
             const html = buildHtml({

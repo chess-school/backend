@@ -16,7 +16,7 @@ const Schedule = require('../models/Schedule');
 const Group = require('../models/Group');
 const Coach = require('../models/Coach');
 const TrainingContract = require('../models/TrainingContract');
-const Notification = require('../models/Notification');
+const { notify: emitNotification } = require('./notify');
 const PuzzleBook = require('../models/PuzzleBook');
 const { forbidden, notFound, conflict, unprocessable } = require('../utils/apiError');
 
@@ -39,14 +39,11 @@ const requireCoachId = async (user) => {
     return coachId;
 };
 
-/** Уведомление — «по возможности»: его сбой не должен ронять сдачу или проверку ДЗ */
-const notify = async (payload) => {
-    try {
-        await Notification.create(payload);
-    } catch (e) {
-        console.error('Homework notification failed:', e.message);
-    }
-};
+/** Уведомление — «по возможности»: его сбой не должен ронять сдачу или проверку ДЗ.
+ *  Идёт через общий сервис (репозиторий-шов mongo|pg); он сам глотает ошибки.
+ *  Call-site'ы передают Mongo-форму с metadata — мапим её в плоские link/entity. */
+const notify = ({ recipient, type, message, description, metadata }) =>
+    emitNotification({ recipient, type, message, description, link: metadata?.link, entity: metadata?.entity });
 
 /** Условие «ДЗ адресовано этому студенту»: лично, через его группы или через активные записи на курсы */
 const studentAudience = async (studentId) => {

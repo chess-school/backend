@@ -1,6 +1,8 @@
 // v2/controllers/notification.controller.js
 
-const Notification = require('../models/Notification'); // Ссылка на V2 модель
+// Доступ к хранилищу — через репозиторий-шов (mongo|pg по флагу NOTIF_DB).
+// См. v2/repositories/notification.repo.js и docs/postgres-migration/.
+const repo = require('../repositories/notification.repo');
 
 /**
  * @desc    Получить все уведомления для текущего пользователя
@@ -8,12 +10,10 @@ const Notification = require('../models/Notification'); // Ссылка на V2 
  * @access  Private
  */
 const getMyNotifications = async (req, res) => {
-    const notifications = await Notification.find({ recipient: req.user.id })
-                                            .sort({ createdAt: -1 })
-                                            .limit(50); // Добавим лимит, чтобы не загружать тысячи
-    
-    // Подсчитаем количество непрочитанных для удобства фронтенда
-    const unreadCount = await Notification.countDocuments({ recipient: req.user.id, read: false });
+    const [notifications, unreadCount] = await Promise.all([
+        repo.listForRecipient(req.user.id, 50), // лимит, чтобы не тянуть тысячи
+        repo.countUnread(req.user.id),
+    ]);
 
     res.json({
         data: notifications,
@@ -30,12 +30,7 @@ const getMyNotifications = async (req, res) => {
 const markAsRead = async (req, res) => {
     const { notificationId } = req.params;
 
-    const notification = await Notification.findOneAndUpdate(
-        // Находим, только если я получатель
-        { _id: notificationId, recipient: req.user.id }, 
-        { read: true },
-        { new: true }
-    );
+    const notification = await repo.markRead(notificationId, req.user.id);
 
     if (!notification) {
         return res.status(404).json({ msg: 'Notification not found or access denied.' });
@@ -50,10 +45,7 @@ const markAsRead = async (req, res) => {
  * @access  Private
  */
 const markAllAsRead = async (req, res) => {
-    await Notification.updateMany(
-        { recipient: req.user.id, read: false },
-        { read: true }
-    );
+    await repo.markAllRead(req.user.id);
     res.json({ msg: 'All notifications marked as read.' });
 };
 
@@ -66,11 +58,8 @@ const markAllAsRead = async (req, res) => {
 const deleteNotification = async (req, res) => {
     const { notificationId } = req.params;
 
-    const result = await Notification.findOneAndDelete({ 
-        _id: notificationId, 
-        recipient: req.user.id 
-    });
-    
+    const result = await repo.remove(notificationId, req.user.id);
+
     if (!result) {
          return res.status(404).json({ msg: 'Notification not found or access denied.' });
     }

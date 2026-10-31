@@ -2,6 +2,7 @@ const Group = require('../models/Group');
 const Coach = require('../models/Coach');
 const User = require('../models/User');
 const TrainingContract = require('../models/TrainingContract');
+const { notify } = require('../services/notify');
 
 // Записи, по которым студент реально учится у тренера (отменённые/возвращённые не дают права на группу)
 const LIVE_CONTRACT_STATUSES = ['pending_payment', 'pending_approval', 'active'];
@@ -146,6 +147,15 @@ const addMemberToGroup = async (req, res) => {
         const stillLinked = await TrainingContract.exists({ student: studentToAdd._id, group: previousGroup });
         if (!stillLinked) await Group.updateOne({ _id: previousGroup }, { $pull: { members: studentToAdd._id } });
     }
+
+    // Чекпоинт: ученик узнаёт, что его добавили в группу
+    await notify({
+        recipient: studentToAdd._id,
+        type: 'GROUP_INVITE',
+        message: `You were added to the group "${group.name}".`,
+        link: '/my-groups',
+        entity: { type: 'Group', id: group._id },
+    });
 
     res.json({ msg: 'Student successfully added to the group.' });
 };

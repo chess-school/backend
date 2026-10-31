@@ -9,16 +9,14 @@
 const User = require('../models/User');
 const Coach = require('../models/Coach');
 const CoachApplication = require('../models/CoachApplication');
-const Notification = require('../models/Notification');
+const { notify: emitNotification } = require('./notify');
 const { conflict, forbidden, notFound } = require('../utils/apiError');
 
 const SUPPORTED_LANGS = ['en', 'uk', 'pl'];
 const PUBLIC_USER = 'uuid firstName lastName avatarUrl email phone';
 
-const notify = (recipient, type, message, link) =>
-    Notification.create({ recipient, type, message, metadata: { link } })
-        // Уведомление — не повод проваливать заявку
-        .catch((e) => console.error('Coach application notification failed:', e.message));
+// Через общий сервис (репозиторий-шов mongo|pg). Ошибки он уже глотает сам.
+const notify = (recipient, type, message, link) => emitNotification({ recipient, type, message, link });
 
 const toDto = (a) => ({
     _id: a._id,

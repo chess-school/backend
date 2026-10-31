@@ -2,8 +2,9 @@
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const TrainingContract = require('../models/TrainingContract');
-const Payment = require('../models/Payment');
+const paymentRepo = require('../repositories/payment.repo');
 require('../models/Course'); // регистрирует модель для populate('course')
+const { notify } = require('../services/notify');
 
 /**
  * @desc    Создание Stripe Checkout сессии для оплаты контракта.
@@ -103,29 +104,38 @@ const handleStripeWebhook = async (req, res) => {
             //    а create() падал на уникальном gatewayTransactionId -> 500 -> бесконечные повторы
             const paidAmount = session.amount_total;
             const paidCurrency = (session.currency || '').toUpperCase();
-            try {
-                await Payment.updateOne(
-                    { gatewayTransactionId: session.payment_intent || session.id },
-                    {
-                        $setOnInsert: {
-                            user: userId || contract.student,
-                            contract: contract._id,
-                            amount: paidAmount,
-                            currency: paidCurrency,
-                            paymentGateway: 'Stripe',
-                            status: 'succeeded',
-                            metadata: { checkoutSessionId: session.id },
-                            // Клуб-владелец (#7): из метаданных сессии, выставленных при создании checkout
-                            ...(club ? { club } : {}),
-                        },
-                    },
-                    { upsert: true, runValidators: true },
-                );
-            } catch (e) {
+            // Идемпотентная запись платежа через репозиторий-шов (mongo|pg). Stripe может
+            // доставить событие повторно — повторная вставка не создаётся.
+            const { inserted: paymentInserted, duplicateContract } = await paymentRepo.upsertStripePayment(
+                session.payment_intent || session.id,
+                {
+                    user: userId || contract.student,
+                    contract: contract._id,
+                    amount: paidAmount,
+                    currency: paidCurrency,
+                    paymentGateway: 'Stripe',
+                    status: 'succeeded',
+                    metadata: { checkoutSessionId: session.id },
+                    // Клуб-владелец (#7): из метаданных сессии, выставленных при создании checkout
+                    ...(club ? { club } : {}),
+                },
+            );
+            if (duplicateContract) {
                 // По этому контракту уже есть платёж с другим ID транзакции (Payment.contract уникален)
-                if (e.code !== 11000) throw e;
                 console.warn(`Contract ${contractId} already has a payment; duplicate checkout ${session.id} ignored.`);
                 return res.status(200).send();
+            }
+
+            // Чекпоинт: успешная оплата. Эмитим ТОЛЬКО при первой вставке платежа —
+            // Stripe может доставить событие повторно, колокольчик не дублируем.
+            if (paymentInserted) {
+                await notify({
+                    recipient: contract.student,
+                    type: 'PAYMENT_SUCCESSFUL',
+                    message: 'Your payment was received successfully.',
+                    link: '/my-courses',
+                    entity: { type: 'Course', id: contract.course },
+                });
             }
 
             // 3. Активируем запись, только если сумма и валюта совпали и запись ещё ждёт оплаты:
@@ -139,13 +149,39 @@ const handleStripeWebhook = async (req, res) => {
                     { _id: contract._id, status: { $in: ['pending_payment', 'pending_approval'] } },
                     { $set: { status: 'active', startDate: contract.startDate || new Date() } },
                 );
-                if (activated.modifiedCount) console.log(`Contract ${contractId} activated.`);
+                if (activated.modifiedCount) {
+                    console.log(`Contract ${contractId} activated.`);
+                    // Чекпоинт: запись на курс активирована (эмитим только при реальной активации)
+                    await notify({
+                        recipient: contract.student,
+                        type: 'CONTRACT_APPROVED',
+                        message: 'Your enrollment is now active. Happy training!',
+                        link: '/my-courses',
+                        entity: { type: 'Course', id: contract.course },
+                    });
+                }
             }
 
         } catch (dbError) {
             console.error('Error updating database after payment:', dbError);
             // Если что-то пошло не так, мы должны вернуть ошибку, чтобы Stripe попробовал снова
             return res.status(500).json({ error: 'Database update failed' });
+        }
+    } else if (event.type === 'checkout.session.async_payment_failed') {
+        // Чекпоинт: отложенный платёж не прошёл — сообщаем ученику
+        const session = event.data.object;
+        const { contractId } = session.metadata || {};
+        const contract = contractId
+            ? await TrainingContract.findById(contractId).select('student course').lean()
+            : null;
+        if (contract) {
+            await notify({
+                recipient: contract.student,
+                type: 'PAYMENT_FAILED',
+                message: 'Your payment could not be processed. Please try again.',
+                link: '/my-courses',
+                entity: { type: 'Course', id: contract.course },
+            });
         }
     } else {
         console.log(`Unhandled event type: ${event.type}`);

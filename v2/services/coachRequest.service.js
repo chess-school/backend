@@ -12,7 +12,7 @@ const Coach = require('../models/Coach');
 const Course = require('../models/Course');
 const TrainingContract = require('../models/TrainingContract');
 const CoachRequest = require('../models/CoachRequest');
-const Notification = require('../models/Notification');
+const { notify: emitNotification } = require('./notify');
 const studentService = require('./student.service');
 const { conflict, forbidden, notFound, unprocessable } = require('../utils/apiError');
 
@@ -38,9 +38,8 @@ const toDto = (r) => ({
         : r.coach,
 });
 
-const notify = (recipient, type, message, link) => Notification.create({ recipient, type, message, metadata: { link } })
-    // Уведомление — не повод проваливать заявку
-    .catch((e) => console.error('Coach request notification failed:', e.message));
+// Через общий сервис (репозиторий-шов mongo|pg). Ошибки он уже глотает сам.
+const notify = (recipient, type, message, link) => emitNotification({ recipient, type, message, link });
 
 /** Ученик отправляет заявку тренеру (coachId — id профиля Coach) */
 const createRequest = async (user, coachId, { experience, goals }, club) => {

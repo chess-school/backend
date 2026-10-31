@@ -4,7 +4,7 @@ const Club = require('../models/Club');
 const ClubMembership = require('../models/ClubMembership');
 const Group = require('../models/Group');
 const Schedule = require('../models/Schedule');
-const Payment = require('../models/Payment');
+const paymentRepo = require('../repositories/payment.repo');
 const Coach = require('../models/Coach');
 const { notFound } = require('../utils/apiError');
 
@@ -51,7 +51,7 @@ const getOverview = async (req, res) => {
         Schedule.find({ club: clubId, date: { $gte: dayStart, $lt: dayEnd } })
             .populate({ path: 'coach', populate: { path: 'user', select: 'firstName lastName' } }).sort({ date: 1 }).lean(),
         Schedule.find({ club: clubId, 'context.type': 'group', date: { $gte: now } }).sort({ date: 1 }).lean(),
-        Payment.find({ club: clubId }).select('amount currency status').lean(),
+        paymentRepo.findByClub(clubId),
     ]);
 
     // Ближайшее групповое занятие по каждой группе

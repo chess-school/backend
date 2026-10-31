@@ -11,7 +11,11 @@
 //   студент — только своя карточка (GET /students/me).
 
 const mongoose = require('mongoose');
+// Модель User оставлена ТОЛЬКО для Mongo-аггрегации $lookup (User.collection.name):
+// кросс-коллекционный джойн contracts→testusers остаётся на Mongo, пока TrainingContract
+// не перенесён в PG. Дискретные CRUD-операции по пользователю идут через шов userRepo.
 const User = require('../models/User');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const Coach = require('../models/Coach');
 const Course = require('../models/Course');
 const Group = require('../models/Group');
@@ -26,6 +30,14 @@ const { ObjectId } = mongoose.Types;
 
 // Публичные поля пользователя в ответах модуля (без пароля, токенов и т.п.)
 const STUDENT_FIELDS = 'uuid firstName lastName email phone avatarUrl createdAt';
+const STUDENT_FIELD_LIST = STUDENT_FIELDS.split(' ');
+// Проекция публичного документа шва к набору STUDENT_FIELDS (+ _id, как было у Mongoose).
+const pickStudent = (u) => {
+    if (!u) return u;
+    const out = { _id: u._id };
+    for (const k of STUDENT_FIELD_LIST) if (u[k] !== undefined) out[k] = u[k];
+    return out;
+};
 
 const ENROLLMENT_STATUSES = ['pending_payment', 'pending_approval', 'active', 'completed', 'cancelled', 'refunded'];
 const INITIAL_STATUSES = ['pending_payment', 'pending_approval', 'active'];
@@ -64,9 +76,9 @@ const requireCoachProfile = (scope) => {
 };
 
 const findStudentByUuid = async (uuid) => {
-    const user = await User.findOne({ uuid }).select(STUDENT_FIELDS).lean();
+    const user = await userRepo.findByUuid(uuid);
     if (!user) throw notFound('Student not found.', 'STUDENT_NOT_FOUND');
-    return user;
+    return pickStudent(user);
 };
 
 const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -323,8 +335,8 @@ const enrollStudent = async (scope, payload) => {
     requireCoachProfile(scope);
 
     const student = payload.userUuid
-        ? await User.findOne({ uuid: payload.userUuid }).select('_id uuid').lean()
-        : await User.findOne({ email: payload.email.toLowerCase() }).select('_id uuid').lean();
+        ? await userRepo.findByUuid(payload.userUuid)
+        : await userRepo.findByEmail(payload.email);
     if (!student) {
         throw notFound('User not found. The student must register on the site first.', 'USER_NOT_FOUND');
     }
@@ -479,13 +491,10 @@ const updateStudentProfile = async (uuid, payload) => {
     if (Object.keys(set).length === 0 && Object.keys(unset).length === 0) {
         throw badRequest('Nothing to update.', 'EMPTY_UPDATE');
     }
-    const user = await User.findOneAndUpdate(
-        { uuid },
-        { ...(Object.keys(set).length ? { $set: set } : {}), ...(Object.keys(unset).length ? { $unset: unset } : {}) },
-        { new: true, runValidators: true },
-    ).select(STUDENT_FIELDS).lean();
+    const phonePatch = Object.keys(unset).length ? { phone: null } : {};
+    const user = await userRepo.updateProfileByUuid(uuid, { ...set, ...phonePatch });
     if (!user) throw notFound('Student not found.', 'STUDENT_NOT_FOUND');
-    return user;
+    return pickStudent(user);
 };
 
 module.exports = {

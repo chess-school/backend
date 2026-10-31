@@ -6,7 +6,7 @@
 // запускает партию. Кто ждёт дольше — того соединяют первым. Диапазон расширяется со временем
 // ожидания (+100 каждые 10 с), чтобы не ждать вечно. Очередь — в памяти процесса.
 
-const User = require('../../models/User');
+const userRepo = require('../../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const { buildTimeControl, LIMITS } = require('../../utils/timeControl');
 const { DEFAULT_RATING } = require('../../utils/ratingCalculator');
 const { unprocessable } = require('../../utils/apiError');
@@ -19,7 +19,7 @@ const createMatchmaking = ({
     createPairedGame,
     notifyUser = () => {},
     ratingOf = async (userId, speed) => {
-        const u = await User.findById(userId).select('ratings').lean();
+        const u = await userRepo.findRatings(userId);
         return Math.round(u?.ratings?.[speed]?.rating ?? DEFAULT_RATING.rating);
     },
     now = Date.now,
@@ -112,7 +112,7 @@ const createRedisMatchmaking = ({
     notifyUser = () => {},
     redis = require('./redis'),
     ratingOf = async (userId, speed) => {
-        const u = await User.findById(userId).select('ratings').lean();
+        const u = await userRepo.findRatings(userId);
         return Math.round(u?.ratings?.[speed]?.rating ?? DEFAULT_RATING.rating);
     },
     now = Date.now,

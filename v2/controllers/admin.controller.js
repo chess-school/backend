@@ -1,6 +1,6 @@
 // v2/controllers/admin.controller.js
 
-const User = require('../models/User');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const Coach = require('../models/Coach');
 // const mongoose = require('mongoose');
 
@@ -23,31 +23,14 @@ const getUsers = async (req, res) => {
     // Деструктуризируем query-параметры
     const { uuid, email, role, page = 1, limit = 10 } = req.query;
 
-    const query = {}; // Начинаем с пустого объекта для фильтров
+    // Фильтр (uuid точный, email — подстрока без регистра, role — наличие в массиве);
+    // экранирование/нормализацию и проекцию секретов делает репозиторный шов.
+    const filter = { uuid, email, role };
 
-    // Динамически строим объект query на основе переданных параметров
-    if (uuid) {
-        query.uuid = uuid;
-    }
-    if (email) {
-        // Экранируем спецсимволы regex и ограничиваем длину (защита от ReDoS),
-        // тот же подход, что в coach.controller.js (getCoaches).
-        const safeEmail = String(email).slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        // Используем case-insensitive regex для поиска по части email
-        query.email = { $regex: safeEmail, $options: 'i' };
-    }
-    if (role) {
-        query.roles = role; // Ищет пользователей, у которых есть указанная роль в массиве
-    }
-    
     // Пагинация
     const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
-    
-    const users = await User.find(query)
-        .select('-password -verificationToken -sessionTokenVersion')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit, 10));
+
+    const users = await userRepo.findMany(filter, { skip, limit: parseInt(limit, 10) });
 
     // Если искали по уникальному идентификатору (uuid) и нашли ровно одного пользователя,
     // можно вернуть его как отдельный объект, а не в массиве. Это удобно для фронтенда.
@@ -64,7 +47,7 @@ const getUsers = async (req, res) => {
     }
 
     // В остальных случаях возвращаем список с пагинацией
-    const totalUsers = await User.countDocuments(query);
+    const totalUsers = await userRepo.count(filter);
     
     res.json({
         data: users,
@@ -93,24 +76,24 @@ const updateUserRoles = async (req, res) => {
         return res.status(400).json({ msg: 'Invalid roles array provided.' });
     }
 
-    const user = await User.findOne({ uuid });
+    const user = await userRepo.findByUuid(uuid);
     if (!user) {
         return res.status(404).json({ msg: 'User not found.' });
     }
 
-    user.roles = [...new Set(roles)];
+    const nextRoles = [...new Set(roles)];
 
-    if (user.roles.includes('COACH')) {
+    if (nextRoles.includes('COACH')) {
         await Coach.findOneAndUpdate(
             { user: user._id },
             { $setOnInsert: { user: user._id } },
             { upsert: true }
         );
     }
-    
-    await user.save();
-    
-    res.json({ msg: 'User roles updated successfully.', roles: user.roles });
+
+    await userRepo.updateRoles(user._id, nextRoles);
+
+    res.json({ msg: 'User roles updated successfully.', roles: nextRoles });
 };
 
 
@@ -126,7 +109,7 @@ const verifyCoach = async (req, res) => {
         return res.status(400).json({ msg: 'UUID must be provided as a query parameter.' });
     }
     
-    const user = await User.findOne({ uuid });
+    const user = await userRepo.findByUuid(uuid);
     if (!user) {
         return res.status(404).json({ msg: 'User with this UUID not found.' });
     }

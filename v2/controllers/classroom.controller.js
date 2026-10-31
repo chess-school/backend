@@ -13,7 +13,7 @@
 
 const { AccessToken, TrackSource, WebhookReceiver } = require('livekit-server-sdk');
 const Group = require('../models/Group');
-const User = require('../models/User');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const Schedule = require('../models/Schedule');
 const ClassroomSession = require('../models/ClassroomSession');
 const { authorize, roomIdForLesson } = require('../services/classroom/classroomManager');
@@ -47,7 +47,7 @@ const generateToken = async (req, res) => {
     const { role } = await authorize(roomId, req.user);
 
     // Отображаемое имя участника в сетке видео
-    const user = await User.findById(req.user.id).select('firstName lastName avatarUrl').lean();
+    const user = await userRepo.findById(req.user.id);
     const displayName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'User' : 'User';
 
     const at = new AccessToken(apiKey, apiSecret, {

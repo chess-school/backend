@@ -136,3 +136,33 @@ pm2 reload chess-cluster
   upsert на PG проверена (new / повтор-txn / дубль-контракта). Тесты 122/122.
 - [ ] Флип: `node scripts/migrate-payments.js` → `PAYMENT_DB=pg` → `pm2 reload`. Требует
   команды Никиты.
+
+## Домен 3: Identity (v2 'TestUser' / testusers) — ГОТОВ на уровне кода (не флипнут)
+Канонические пользователи — **testusers (v2)** → единая таблица `users`. Legacy `models/User`
+как сущность НЕ переносим (чистка отдельным проходом).
+- [x] Модель `User` + миграция `add_user`. PK=ObjectId-строка. `roles` — реальный массив
+  (`String[]`): фильтры `find({roles:'ADMIN'})`/`find({roles:role})`. Рейтинги Glicko-2 по 4
+  контролям уплощены в **16 колонок** (не JSON), т.к. `gameManager` делает атомарный
+  `$set`/`$inc` на `ratings.{speed}.*` — колонки + Prisma `increment` сохраняют атомарность.
+  `puzzleRating`/`puzzleRatingGames` — скалярные колонки. rating/rd/vol — `Float`.
+- [x] Шов `v2/repositories/user.repo.js` (флаг `USER_DB=mongo|pg`): инкапсулирует bcrypt
+  (хеш при create/updatePassword, `comparePassword`), отдаёт публичный документ БЕЗ секретов
+  (password/verificationToken/sessionTokenVersion) + auth-методы с секретами; наружу — прежняя
+  форма Mongo-дока с вложенным `ratings`. ~25 методов (auth/сессия, профиль/роли, рейтинги).
+- [x] Рероут ВСЕХ потребителей модели: auth.controller, accessToken, user.controller,
+  admin.controller, schedule/classroom/group/coach.controller, puzzleBook.controller,
+  student/coachRequest/coachApplication/chat.service, play/{matchmaking,challenge,gameManager}.
+  Прямых `User.<метод>` вызовов не осталось.
+- [x] ETL `scripts/migrate-users.js` (идемпотентно, пароль копируется как есть — уже bcrypt).
+- [x] Тесты 122/122 (mongo-путь). PG-путь провалидирован смоуком (create/auth/comparePassword/
+  roles/ratings/puzzle/profile/поиск — 23 проверки, с очисткой).
+- [ ] Флип: `node scripts/migrate-users.js` → `USER_DB=pg` → `pm2 reload`. Требует команды Никиты.
+
+### ⚠️ Два кросс-БД «ландмайна» — снять ДО/ПРИ флипе identity
+Эти места читают пользователей ВНУТРИ Mongo и не идут через шов (намеренно оставлены на Mongo,
+пока связанные домены не перенесены). При `USER_DB=pg` они будут читать stale/пустой testusers:
+1. `student.service.js` — аггрегация `$lookup { from: User.collection.name }` (contracts→testusers).
+   Снять, когда в PG будет домен **Coaching/TrainingContract** (джойн внутри PG или в приложении).
+2. `coach.controller.js getCoaches` — `Coach.find().populate('user', …)` (реф `TestUser`).
+   Снять при переносе домена **Coaching/Coach** (подтягивать карточку пользователя через шов).
+Поэтому **флип identity делать ВМЕСТЕ с Coaching** (или сначала переписать эти 2 чтения на шов).

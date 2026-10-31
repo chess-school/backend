@@ -1,5 +1,4 @@
-const User = require('../models/User'); // Пути ../models/ должны быть правильными
-const mongoose = require('mongoose');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 
 // Белый список хостов, на которые разрешено делать редирект аватаром.
 // ui-avatars.com — дефолтные аватары (см. auth.controller.js), остальные — наши CDN.
@@ -33,13 +32,11 @@ const buildDefaultAvatarUrl = (user) => {
  * @access  Private
  */
 const getMyProfile = async (req, res) => {
-    const user = await User.findById(req.user.id).select('-password');
+    const user = await userRepo.findById(req.user.id);
     if (!user) {
         return res.status(404).json({ msg: 'User not found.' });
     }
-    const userResponse = user.toObject();
-    delete userResponse.__v;
-    res.json(userResponse);
+    res.json(user);
 };
 
 /**
@@ -52,35 +49,36 @@ const updateMyProfile = async (req, res) => {
     const userId = req.user.id;
     const { t } = req;
 
-    const user = await User.findById(userId);
-    if (!user) {
+    const existing = await userRepo.findByIdForAuth(userId);
+    if (!existing) {
         return res.status(404).json({ msg: 'User not found' });
     }
 
-    if (firstName) user.firstName = firstName;
-    if (lastName) user.lastName = lastName;
-    // phone: строка в формате E.164 (уже провалидирована в роуте) или null/'' — удалить
-    if (phone !== undefined) user.phone = phone || undefined;
-    
+    // Смену пароля проверяем ДО записи профиля (неверный текущий пароль ничего не меняет)
     if (newPassword) {
         if (!currentPassword) {
             return res.status(400).json({ msg: t('api.auth.currentPasswordRequired') });
         }
-        const isMatch = await user.comparePassword(currentPassword);
+        const isMatch = await userRepo.comparePassword(existing, currentPassword);
         if (!isMatch) {
             return res.status(400).json({ msg: t('api.auth.invalidCurrentPassword') });
         }
-        user.password = newPassword;
     }
 
-    await user.save();
-    
-    const userResponse = user.toObject();
-    delete userResponse.password;
+    const patch = {};
+    if (firstName) patch.firstName = firstName;
+    if (lastName) patch.lastName = lastName;
+    // phone: строка E.164 (уже провалидирована в роуте) или null/'' — очистить
+    if (phone !== undefined) patch.phone = phone || null;
+    if (Object.keys(patch).length) await userRepo.updateProfile(userId, patch);
 
-    res.json({ 
-        msg: t('api.auth.profileUpdatedSuccess'), 
-        user: userResponse 
+    if (newPassword) await userRepo.updatePassword(userId, newPassword);
+
+    const userResponse = await userRepo.findById(userId); // свежий публичный документ (без пароля)
+
+    res.json({
+        msg: t('api.auth.profileUpdatedSuccess'),
+        user: userResponse
     });
 };
 
@@ -108,7 +106,7 @@ const getAvatarByUuid = async (req, res) => {
     const { uuid } = req.params;
 
     // Ищем пользователя и получаем URL его аватара (+ имя для дефолтного аватара)
-    const user = await User.findOne({ uuid }).select('avatarUrl firstName lastName');
+    const user = await userRepo.findByUuid(uuid);
 
     if (!user) {
         // Вернем 404, чтобы фронтенд показал свой плейсхолдер.

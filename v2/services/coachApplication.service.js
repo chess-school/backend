@@ -6,7 +6,7 @@
 // Списаться с кандидатом админ может через обычный чат (chat.service: ADMIN пишет любому).
 // Ошибки — ApiError -> { msg, code, details? } (errorHandlerV2).
 
-const User = require('../models/User');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const Coach = require('../models/Coach');
 const CoachApplication = require('../models/CoachApplication');
 const { notify: emitNotification } = require('./notify');
@@ -45,7 +45,7 @@ const toDto = (a) => ({
 
 /** Пользователь подаёт заявку на роль тренера */
 const submit = async (user, payload, club) => {
-    const current = await User.findById(user.id).select('roles').lean();
+    const current = await userRepo.findById(user.id);
     if (!current) throw notFound('User not found.', 'USER_NOT_FOUND');
     if ((current.roles || []).includes('COACH')) {
         throw conflict('You are already a coach.', 'ALREADY_COACH');
@@ -74,8 +74,8 @@ const submit = async (user, payload, club) => {
     }
 
     // Оповестить всех админов — им в «Заявки тренеров» на рассмотрение
-    const admins = await User.find({ roles: 'ADMIN' }).select('_id').lean();
-    const applicant = await User.findById(user.id).select('firstName lastName').lean();
+    const admins = await userRepo.findAdmins();
+    const applicant = await userRepo.findById(user.id);
     const who = `${applicant?.firstName ?? ''} ${applicant?.lastName ?? ''}`.trim() || 'A user';
     await Promise.all(admins.map((a) => notify(a._id, 'COACH_APPLICATION', `${who} applied to become a coach`, '/coach-applications')));
 
@@ -132,11 +132,10 @@ const decide = async (user, applicationId, { status, adminNote }) => {
     if (application.status !== 'pending') throw conflict('This application has already been decided.', 'APPLICATION_ALREADY_DECIDED');
 
     if (status === 'approved') {
-        const applicant = await User.findById(application.applicant);
+        const applicant = await userRepo.findById(application.applicant);
         if (!applicant) throw notFound('Applicant not found.', 'USER_NOT_FOUND');
         if (!applicant.roles.includes('COACH')) {
-            applicant.roles = [...new Set([...applicant.roles, 'COACH'])];
-            await applicant.save();
+            await userRepo.addRole(applicant._id, 'COACH');
         }
         // Профиль заполнен данными заявки и сразу виден в каталоге:
         // одобрение заявки админом и есть проверка кандидата, отдельная верификация не нужна.

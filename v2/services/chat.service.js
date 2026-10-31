@@ -9,7 +9,7 @@
 // Каждое изменение (REST или сокет) пишется в БД и рассылается участникам через chatRealtime.
 
 const mongoose = require('mongoose');
-const User = require('../models/User');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const Coach = require('../models/Coach');
 const TrainingContract = require('../models/TrainingContract');
 const ChatRoom = require('../models/ChatRoom');
@@ -54,7 +54,7 @@ const relationsOf = async (userId) => {
 /** Можно ли user начать диалог с otherId */
 const canChat = async (user, otherId) => {
     if (isAdmin(user)) return true;
-    const other = await User.findById(otherId).select('roles').lean();
+    const other = await userRepo.findById(otherId);
     if (other && (other.roles || []).includes('ADMIN')) return true;
     return (await relationsOf(user.id)).has(String(otherId));
 };
@@ -135,7 +135,7 @@ const normalizeContext = (context) => {
 const openRoom = async (user, { userId: otherId, context }) => {
     if (!ObjectId.isValid(otherId)) throw badRequest('Invalid user id.', 'INVALID_ID');
     if (String(otherId) === String(user.id)) throw badRequest('You cannot start a chat with yourself.', 'CHAT_WITH_SELF');
-    if (!(await User.exists({ _id: otherId }))) throw notFound('User not found.', 'USER_NOT_FOUND');
+    if (!(await userRepo.existsById(otherId))) throw notFound('User not found.', 'USER_NOT_FOUND');
     if (!(await canChat(user, otherId))) {
         throw forbidden('You can only message your coach or your students.', 'CHAT_NOT_ALLOWED');
     }
@@ -239,7 +239,7 @@ const unreadSummary = async (user) => {
 const listContacts = async (user) => {
     const relations = await relationsOf(user.id);
     if (!relations.size) return [];
-    const users = await User.find({ _id: { $in: [...relations.keys()] } }).select(PUBLIC_USER).sort({ lastName: 1, firstName: 1 }).lean();
+    const users = await userRepo.findByIdList([...relations.keys()]); // шов уже сортирует по lastName,firstName
     return users.map((u) => ({ ...toUserDto(u), relation: relations.get(String(u._id)) }));
 };
 

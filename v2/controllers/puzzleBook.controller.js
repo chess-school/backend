@@ -3,7 +3,7 @@
 const mongoose = require('mongoose');
 const PuzzleBook = require('../models/PuzzleBook');
 const PuzzleAttempt = require('../models/PuzzleAttempt');
-const User = require('../models/User');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const Group = require('../models/Group');
 const { getTask, getReadyChapterFiles, loadChapterExercises } = require('../services/digitizer.service');
 const { parseMainline } = require('../utils/pgnMainline');
@@ -362,7 +362,7 @@ const recordAttempt = async (req, res) => {
     // Успех засчитывается только при решении с 1-й попытки без подсказок.
     const success = solved && !usedHint && mistakes === 0;
 
-    const userDoc = await User.findById(req.user.id).select('puzzleRating puzzleRatingGames');
+    const userDoc = await userRepo.findPuzzleRating(req.user.id);
     const userRating = (userDoc && Number.isFinite(userDoc.puzzleRating)) ? userDoc.puzzleRating : DEFAULT_RATING;
     const puzzleRating = Number.isFinite(exercise.rating) ? exercise.rating : DEFAULT_RATING;
 
@@ -370,7 +370,7 @@ const recordAttempt = async (req, res) => {
 
     // Персист: рейтинг ученика и рейтинг конкретного упражнения (атомарно через позиционный $)
     await Promise.all([
-        User.updateOne({ _id: req.user.id }, { $set: { puzzleRating: change.newUserRating }, $inc: { puzzleRatingGames: 1 } }),
+        userRepo.updatePuzzleRating(req.user.id, change.newUserRating),
         PuzzleBook.updateOne(
             { _id: book._id, 'exercises._id': exerciseId },
             { $set: { 'exercises.$.rating': change.newPuzzleRating }, $inc: { 'exercises.$.ratingAttempts': 1 } },
@@ -424,8 +424,7 @@ const getBookStats = async (req, res) => {
         } },
         { $sort: { lastActivity: -1 } },
     ]);
-    const users = await User.find({ _id: { $in: rows.map((r) => r._id) } })
-        .select('firstName lastName email uuid').lean();
+    const users = await userRepo.findByIdList(rows.map((r) => r._id));
     const byId = new Map(users.map((u) => [String(u._id), u]));
     const students = rows.map((r) => ({
         student: byId.get(String(r._id)) || { _id: r._id, firstName: '', lastName: '', email: '' },

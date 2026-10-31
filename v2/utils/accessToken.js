@@ -5,7 +5,7 @@
 // старые токены недействительны). Роли — актуальные из БД, а не из токена.
 
 const jwt = require('jsonwebtoken');
-const UserV2 = require('../models/User');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 
 class AccessTokenError extends Error {
     constructor(code, message, status = 401) {
@@ -30,7 +30,7 @@ const verifyAccessToken = async (token) => {
 
     let user;
     try {
-        user = await UserV2.findById(decoded.id).select('sessionTokenVersion roles uuid');
+        user = await userRepo.findByIdForAuth(decoded.id);
     } catch (e) {
         // Сбой БД — это не «плохой токен»: 401 разлогинил бы всех при недоступности MongoDB
         console.error('Auth V2 Error:', e.message);

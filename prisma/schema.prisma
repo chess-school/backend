@@ -96,3 +96,60 @@ model Payment {
   @@index([clubId])
   @@map("payments")
 }
+
+// --- Домен 3: Identity (v2 User == mongoose-модель 'TestUser', коллекция testusers) ---
+// Канонические пользователи (решение Никиты: testusers → единая таблица users;
+// legacy models/User как сущность НЕ переносим). PK = строка Mongo ObjectId.
+// Нормализацию email→lowercase, телефон E.164, хеш пароля (bcrypt) и проверку
+// пароля делает репозиторный шов user.repo.js (как раньше Mongoose pre-save/методы).
+//
+// roles — РЕАЛЬНЫЙ массив: есть фильтры find({roles:'ADMIN'}) и find({roles:role}).
+// Рейтинги Glicko-2 по 4 контролям уплощены в 16 КОЛОНОК (не JSON): gameManager
+// делает АТОМАРНЫЙ $set/$inc на ratings.{speed}.* после рейтинговой партии —
+// колонки + Prisma increment сохраняют атомарность без гонки read-modify-write.
+// Шов отдаёт их наружу в прежней форме { ratings: { bullet:{rating,rd,vol,games}, ... } }.
+
+model User {
+  id                  String   @id // Mongo ObjectId (hex)
+  uuid                String   @unique @default(uuid())
+  firebaseUID         String?  @unique // sparse: NULL в Postgres различны — несколько NULL допустимы
+  firstName           String
+  lastName            String
+  avatarUrl           String?
+  email               String   @unique // всегда lowercase (нормализует шов)
+  phone               String? // E.164 (+380501234567), валидирует шов
+  emailVerified       Boolean  @default(false)
+  verificationToken   String?
+  password            String // bcrypt-хеш
+  roles               String[] @default(["USER"])
+  sessionTokenVersion Int      @default(0) // ревокация сессий (accessToken.js)
+
+  // Рейтинги онлайн-партий (Glicko-2, v2/utils/ratingCalculator.js) — по контролям
+  bulletRating    Float @default(1500)
+  bulletRd        Float @default(350)
+  bulletVol       Float @default(0.06)
+  bulletGames     Int   @default(0)
+  blitzRating     Float @default(1500)
+  blitzRd         Float @default(350)
+  blitzVol        Float @default(0.06)
+  blitzGames      Int   @default(0)
+  rapidRating     Float @default(1500)
+  rapidRd         Float @default(350)
+  rapidVol        Float @default(0.06)
+  rapidGames      Int   @default(0)
+  classicalRating Float @default(1500)
+  classicalRd     Float @default(350)
+  classicalVol    Float @default(0.06)
+  classicalGames  Int   @default(0)
+
+  // Рейтинг решения задач (Elo, v2/utils/puzzleRatingCalculator.js) — Module 4
+  puzzleRating      Float @default(1500)
+  puzzleRatingGames Int   @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([verificationToken])
+  @@index([lastName, firstName]) // список/сортировка студентов (chat, admin)
+  @@map("users")
+}

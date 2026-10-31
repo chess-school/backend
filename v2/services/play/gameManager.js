@@ -20,7 +20,7 @@
 
 const { Chess } = require('chess.js');
 const LiveGame = require('../../models/LiveGame');
-const User = require('../../models/User');
+const userRepo = require('../../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const { GameClock } = require('./clock');
 const redisModule = require('./redis');
 const { rateGame, isProvisional, DEFAULT_RATING } = require('../../utils/ratingCalculator');
@@ -240,8 +240,8 @@ const createGameManager = ({
     const applyRatings = async (state, winner) => {
         const speed = state.timeControl.type;
         const [w, b] = await Promise.all([
-            User.findById(state.white).select('ratings').lean(),
-            User.findById(state.black).select('ratings').lean(),
+            userRepo.findRatings(state.white),
+            userRepo.findRatings(state.black),
         ]);
         const before = {
             white: { ...DEFAULT_RATING, ...(w?.ratings?.[speed] || {}) },
@@ -249,10 +249,7 @@ const createGameManager = ({
         };
         const score = winner === 'white' ? 1 : winner === 'black' ? 0 : 0.5;
         const rated = rateGame(before.white, before.black, score);
-        const save = (id, r) => User.updateOne({ _id: id }, {
-            $set: { [`ratings.${speed}.rating`]: r.rating, [`ratings.${speed}.rd`]: r.rd, [`ratings.${speed}.vol`]: r.vol },
-            $inc: { [`ratings.${speed}.games`]: 1 },
-        });
+        const save = (id, r) => userRepo.updateRatings(id, speed, { rating: r.rating, rd: r.rd, vol: r.vol });
         await Promise.all([save(state.white, rated.white), save(state.black, rated.black)]);
         const snap = (color) => ({
             before: Math.round(before[color].rating),

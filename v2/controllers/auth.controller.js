@@ -2,7 +2,7 @@
 const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
 const { randomBytes, randomUUID } = require('crypto'); 
-const User = require('../models/User'); // Все модели V2 живут в v2/models/
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const Player = require('../models/Player');
 const { sendVerificationEmailV2 } = require('../utils/email/email.service'); 
 
@@ -23,7 +23,7 @@ const generateAccessToken = (id, roles, sessionTokenVersion, uuid) => {
 const register = async (req, res) => {
     const { firstName, lastName, email, password } = req.body;
 
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    const existingUser = await userRepo.findByEmail(email);
     if (existingUser) {
         return res.status(400).json({ msg: req.t('api.userExistsError') });
     }
@@ -31,16 +31,15 @@ const register = async (req, res) => {
     const defaultAvatarUrl = `https://ui-avatars.com/api/?name=${avatarName}&background=random&color=fff`;
 
     const verificationToken = randomUUID();
-    const user = new User({
+    const user = await userRepo.create({
         firstName,
         lastName,
         email: email.toLowerCase(),
         password,
         roles: ['USER'],
         verificationToken,
-        avatarUrl: defaultAvatarUrl, 
+        avatarUrl: defaultAvatarUrl,
     });
-    await user.save();
 
     const player = new Player({ user: user._id });
     await player.save();
@@ -60,8 +59,8 @@ const login = async (req, res) => {
     const { email, password } = req.body;
     const { t } = req;
 
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user || !(await user.comparePassword(password))) {
+    const user = await userRepo.findByEmailForAuth(email);
+    if (!user || !(await userRepo.comparePassword(user, password))) {
         return res.status(400).json({ msg: t('api.auth.invalidCredentials') });
     }
 
@@ -69,10 +68,9 @@ const login = async (req, res) => {
         return res.status(400).json({ msg: t('api.auth.verifyEmailFirst') });
     }
 
-    user.sessionTokenVersion += 1;
-    await user.save();
+    const newSessionTokenVersion = await userRepo.incrementSessionTokenVersion(user._id);
 
-    const token = generateAccessToken(user._id, user.roles, user.sessionTokenVersion, user.uuid);
+    const token = generateAccessToken(user._id, user.roles, newSessionTokenVersion, user.uuid);
 
     res.status(200).json({
         token,
@@ -95,14 +93,12 @@ const verifyEmail = async (req, res) => {
     const { token } = req.query;
     const { t } = req;
 
-    const user = await User.findOne({ verificationToken: token });
+    const user = await userRepo.findByVerificationToken(token);
     if (!user) {
         return res.status(400).json({ msg: t('api.auth.invalidToken') });
     }
 
-    user.emailVerified = true;
-    user.verificationToken = undefined;
-    await user.save();
+    await userRepo.markEmailVerified(user._id);
 
     res.json({ msg: t('api.auth.emailVerifiedSuccess') });
 };
@@ -122,7 +118,7 @@ const resendVerificationEmail = async (req, res) => {
     const { email } = req.body;
     const { t } = req;
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await userRepo.findByEmail(email);
     if (!user) {
         // Мы не говорим, что юзер не найден, из соображений безопасности
         return res.json({ msg: t('api.auth.ifEmailExistsThenSent') });
@@ -133,8 +129,7 @@ const resendVerificationEmail = async (req, res) => {
     }
 
     const newVerificationToken = randomBytes(32).toString('hex');
-    user.verificationToken = newVerificationToken;
-    await user.save();
+    await userRepo.setVerificationToken(user._id, newVerificationToken);
 
     await sendVerificationEmailV2(user.email, newVerificationToken, t);
 
@@ -156,7 +151,7 @@ const checkVerificationStatus = async (req, res) => {
         return res.status(400).json({ emailVerified: false });
     }
 
-    const user = await User.findOne({ email: String(email).toLowerCase() }).select('emailVerified');
+    const user = await userRepo.findByEmail(email);
 
     if (!user) {
         return res.status(404).json({ emailVerified: false });

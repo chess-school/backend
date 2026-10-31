@@ -1,6 +1,6 @@
 const Group = require('../models/Group');
 const Coach = require('../models/Coach');
-const User = require('../models/User');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const TrainingContract = require('../models/TrainingContract');
 const { notify } = require('../services/notify');
 
@@ -114,7 +114,7 @@ const addMemberToGroup = async (req, res) => {
         return res.status(422).json({ msg: 'Cannot add members to an archived group.', code: 'GROUP_ARCHIVED' });
     }
 
-    const studentToAdd = await User.findOne({ uuid: userUuid }).select('_id');
+    const studentToAdd = await userRepo.findByUuid(userUuid);
     if (!studentToAdd) {
         return res.status(404).json({ msg: 'Student with this UUID not found.', code: 'STUDENT_NOT_FOUND' });
     }
@@ -171,7 +171,7 @@ const removeMemberFromGroup = async (req, res) => {
     const { group } = await loadOwnGroup(req, res, groupId);
     if (!group) return;
 
-    const studentToRemove = await User.findOne({ uuid: userUuid }).select('_id');
+    const studentToRemove = await userRepo.findByUuid(userUuid);
     if (!studentToRemove) {
         return res.status(404).json({ msg: 'Student with this UUID not found.', code: 'STUDENT_NOT_FOUND' });
     }

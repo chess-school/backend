@@ -10,7 +10,7 @@
 //   — партия из очереди автоподбора создаётся сразу активной (createPairedGame).
 
 const LiveGame = require('../../models/LiveGame');
-const User = require('../../models/User');
+const userRepo = require('../../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const { buildTimeControl, LIMITS } = require('../../utils/timeControl');
 const { DEFAULT_RATING, isProvisional } = require('../../utils/ratingCalculator');
 const { conflict, forbidden, notFound, unprocessable, ApiError } = require('../../utils/apiError');
@@ -108,7 +108,7 @@ const acceptChallenge = async (user, challengeId) => {
     if (Date.now() - new Date(doc.createdAt).getTime() > ttl) throw new ApiError(410, 'CHALLENGE_EXPIRED', 'This challenge has expired.');
 
     if (doc.isRated && doc.ratingRange) {
-        const me = await User.findById(user.id).select('ratings').lean();
+        const me = await userRepo.findRatings(user.id);
         const speed = doc.timeControl.type;
         const diff = Math.abs(ratingIn(me, speed).rating - ratingIn(doc.createdBy, speed).rating);
         if (diff > doc.ratingRange) throw forbidden('Your rating is outside the range of this challenge.', 'RATING_OUT_OF_RANGE');
@@ -174,7 +174,7 @@ const rematch = async (user, gameId) => {
 /** Мои рейтинги, активные партии и открытые вызовы */
 const overview = async (user) => {
     const [me, active, challenges] = await Promise.all([
-        User.findById(user.id).select('ratings').lean(),
+        userRepo.findRatings(user.id),
         LiveGame.find({ status: 'active', $or: [{ whitePlayer: user.id }, { blackPlayer: user.id }] }).select('_id timeControl').lean(),
         LiveGame.find({ status: 'created', createdBy: user.id, createdAt: { $gt: new Date(Date.now() - PRIVATE_CHALLENGE_TTL_MS) } })
             .sort({ createdAt: -1 }).limit(10).populate('createdBy', PUBLIC_USER).lean(),

@@ -1,7 +1,7 @@
 // v2/controllers/coach.controller.js
 
 const Coach = require('../models/Coach');
-const User = require('../models/User');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const translateService = require('../services/translate.service');
 const { createLocalizedDTO } = require('../utils/localization.util'); // <-- НАША НОВАЯ УТИЛИТА
 
@@ -103,13 +103,13 @@ const getCoaches = async (req, res) => {
     // Изоляция по клубу (#7): каталог ограничиваем клубом ТОЛЬКО если активный клуб определён
     const query = { isVerified: true, ...(req.club ? { club: req.club } : {}) };
     if (uuid) {
-        const user = await User.findOne({ uuid }).select('_id');
+        const user = await userRepo.findByUuid(uuid);
         if (!user) return res.json(null);
         query.user = user._id;
     } else if (q && q.trim()) {
-        // Поиск по имени: «anna», «anna kow», «kowalska»
-        const words = q.trim().split(/\s+/).slice(0, 3).map((w) => new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
-        const users = await User.find({ $and: words.map((re) => ({ $or: [{ firstName: re }, { lastName: re }] })) }).select('_id').limit(200).lean();
+        // Поиск по имени: «anna», «anna kow», «kowalska» (экранирование/regex — в шве)
+        const words = q.trim().split(/\s+/).slice(0, 3);
+        const users = await userRepo.findByNameWords(words, { limit: 200 });
         query.user = { $in: users.map((u) => u._id) };
     }
     
@@ -167,8 +167,7 @@ const getCoachesByEmail = async (req, res) => {
         return res.status(400).json({ msg: 'Invalid email list' });
     }
 
-    const users = await User.find({ email: { $in: emails } })
-        .select('firstName lastName email roles avatarUrl');
+    const users = await userRepo.findByEmailList(emails);
 
     const formatted = users.map(user => ({
         _id: user._id,

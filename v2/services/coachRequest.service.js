@@ -7,7 +7,7 @@
 //   ADMIN: видит и решает заявки любого тренера.
 // Ошибки — ApiError -> { msg, code, details? } (errorHandlerV2).
 
-const User = require('../models/User');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const Coach = require('../models/Coach');
 const Course = require('../models/Course');
 const TrainingContract = require('../models/TrainingContract');
@@ -60,7 +60,7 @@ const createRequest = async (user, coachId, { experience, goals }, club) => {
         if (e.code === 11000) throw conflict('You have already sent a request to this coach.', 'REQUEST_PENDING');
         throw e;
     }
-    const student = await User.findById(user.id).select('firstName lastName').lean();
+    const student = await userRepo.findById(user.id);
     await notify(coach.user, 'COACH_REQUEST', `${student?.firstName ?? ''} ${student?.lastName ?? ''}`.trim() || 'New student request', '/inbox');
     return toDto(request.toObject());
 };

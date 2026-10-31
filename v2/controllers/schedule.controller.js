@@ -1,7 +1,7 @@
 const Schedule = require('../models/Schedule');
 const Coach = require('../models/Coach');
 const Group = require('../models/Group');
-const User = require('../models/User');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const TrainingContract = require('../models/TrainingContract');
 const Assignment = require('../models/Assignment');
 const { notifyLessonScheduled } = require('../services/lessonNotify.service');
@@ -40,7 +40,7 @@ const createScheduleEvent = async (req, res) => {
 
     // Проверка существования контекста и прав доступа
     if (eventType === 'individual') {
-        const student = await User.findById(contextId).select('_id firstName lastName email');
+        const student = await userRepo.findById(contextId);
         if (!student) return res.status(404).json({ msg: req.t('controllers.schedule.studentNotFound'), code: 'STUDENT_NOT_FOUND' });
         contract = await TrainingContract.findOne({
             student: student._id,
@@ -76,7 +76,7 @@ const createScheduleEvent = async (req, res) => {
     let notified = null;
     if (notify && recipients.length) {
         try {
-            const coachUser = await User.findById(req.user.id).select('firstName lastName email').lean();
+            const coachUser = await userRepo.findById(req.user.id);
             notified = await notifyLessonScheduled({
                 event: newEvent,
                 coach: coachUser || {},
@@ -142,7 +142,7 @@ const getMySchedule = async (req, res) => {
     const refIds = (type) => [...new Set(events.filter(e => e.context.type === type).map(e => String(e.context.refId)))];
     const [groups, students] = await Promise.all([
         Group.find({ _id: { $in: refIds('group') } }).select('name').lean(),
-        User.find({ _id: { $in: refIds('individual') } }).select('uuid firstName lastName').lean(),
+        userRepo.findByIdList(refIds('individual')),
     ]);
     const byId = new Map([...groups, ...students].map(doc => [String(doc._id), doc]));
     events.forEach(e => { e.context.ref = byId.get(String(e.context.refId)) || null; });

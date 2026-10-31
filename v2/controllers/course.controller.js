@@ -1,7 +1,7 @@
 // v2/controllers/course.controller.js
 
 const Course = require('../models/Course');
-const Coach = require('../models/Coach');
+const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const Group = require('../models/Group');
 const mongoose = require('mongoose');
 
@@ -38,7 +38,7 @@ async function buildVisibilityFilter(req) {
 
     // Тренер: плюс свои курсы (любые) и курсы, куда его добавили персонально
     if (roles.includes('COACH')) {
-        const coachProfile = await Coach.findOne({ user: req.user.id }).select('_id').lean();
+        const coachProfile = await coachRepo.findByUser(req.user.id);
         if (coachProfile) or.push({ authors: coachProfile._id }); // свои — в любом статусе/видимости, включая архив
         if (userId) or.push({ allowedUsers: userId, visibility: { $ne: 'draft' }, ...notArchived });
         return { $or: or };
@@ -70,7 +70,7 @@ const createCourse = async (req, res) => {
     const { title, description, price, level, tags, modules, language,
         visibility, allowedUsers, allowedGroups } = req.body;
 
-    const coachProfile = await Coach.findOne({ user: req.user.id });
+    const coachProfile = await coachRepo.findByUser(req.user.id);
     if (!coachProfile) {
         return res.status(403).json({ msg: 'You must have a coach profile to create courses.' });
     }
@@ -105,7 +105,7 @@ const createCourse = async (req, res) => {
  * @access  Private (role: COACH)
  */
 const getMyCourses = async (req, res) => {
-    const coachProfile = await Coach.findOne({ user: req.user.id }).select('_id');
+    const coachProfile = await coachRepo.findByUser(req.user.id);
     if (!coachProfile) {
         return res.json({ data: [] });
     }
@@ -154,7 +154,7 @@ const updateCourse = async (req, res) => {
     }
 
     const isAdmin = (req.user.roles || []).includes('ADMIN');
-    const coachProfile = await Coach.findOne({ user: req.user.id }).select('_id');
+    const coachProfile = await coachRepo.findByUser(req.user.id);
     const isAuthor = coachProfile && course.authors.some((a) => String(a) === String(coachProfile._id));
     if (!isAdmin && !isAuthor) {
         return res.status(403).json({ msg: 'Forbidden: You are not an author of this course.' });
@@ -181,7 +181,7 @@ const updateCourseStatus = async (req, res) => {
         return res.status(400).json({ msg: "Invalid status. Must be one of 'draft', 'published', 'archived'." });
     }
 
-    const coachProfile = await Coach.findOne({ user: req.user.id }).select('_id');
+    const coachProfile = await coachRepo.findByUser(req.user.id);
     if (!coachProfile) {
         return res.status(403).json({ msg: 'You must have a coach profile to manage courses.', code: 'COACH_PROFILE_REQUIRED' });
     }

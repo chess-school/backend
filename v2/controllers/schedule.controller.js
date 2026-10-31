@@ -1,8 +1,8 @@
 const Schedule = require('../models/Schedule');
-const Coach = require('../models/Coach');
+const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const Group = require('../models/Group');
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
-const TrainingContract = require('../models/TrainingContract');
+const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
 const Assignment = require('../models/Assignment');
 const { notifyLessonScheduled } = require('../services/lessonNotify.service');
 
@@ -13,7 +13,7 @@ const LIVE_CONTRACT_STATUSES = ['pending_payment', 'pending_approval', 'active']
 const UPDATABLE_EVENT_FIELDS = ['title', 'description', 'date', 'durationMinutes', 'link', 'status'];
 
 const requireCoach = async (req, res) => {
-    const coachProfile = await Coach.findOne({ user: req.user.id }).select('_id');
+    const coachProfile = await coachRepo.findByUser(req.user.id);
     if (!coachProfile) {
         res.status(403).json({ msg: req.t('controllers.schedule.coachProfileRequired'), code: 'COACH_PROFILE_REQUIRED' });
     }
@@ -42,11 +42,11 @@ const createScheduleEvent = async (req, res) => {
     if (eventType === 'individual') {
         const student = await userRepo.findById(contextId);
         if (!student) return res.status(404).json({ msg: req.t('controllers.schedule.studentNotFound'), code: 'STUDENT_NOT_FOUND' });
-        contract = await TrainingContract.findOne({
+        contract = await contractRepo.findOne({
             student: student._id,
             coach: coachProfile._id,
             status: { $in: LIVE_CONTRACT_STATUSES },
-        }).sort({ createdAt: -1 }).select('_id');
+        }, { sort: { createdAt: -1 } });
         if (!contract) {
             return res.status(403).json({ msg: req.t('controllers.schedule.notYourStudent'), code: 'NOT_YOUR_STUDENT' });
         }
@@ -107,7 +107,7 @@ const getMySchedule = async (req, res) => {
     // Группы пользователя (индекс Group.members) и его профиль тренера — параллельно
     const [userGroups, coachProfile] = await Promise.all([
         Group.find({ members: userId }).select('_id'),
-        Coach.findOne({ user: userId }).select('_id'),
+        coachRepo.findByUser(userId),
     ]);
     const groupIds = userGroups.map(g => g._id);
 

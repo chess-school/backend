@@ -11,15 +11,11 @@
 //   студент — только своя карточка (GET /students/me).
 
 const mongoose = require('mongoose');
-// Модель User оставлена ТОЛЬКО для Mongo-аггрегации $lookup (User.collection.name):
-// кросс-коллекционный джойн contracts→testusers остаётся на Mongo, пока TrainingContract
-// не перенесён в PG. Дискретные CRUD-операции по пользователю идут через шов userRepo.
-const User = require('../models/User');
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
-const Coach = require('../models/Coach');
+const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const Course = require('../models/Course');
 const Group = require('../models/Group');
-const TrainingContract = require('../models/TrainingContract');
+const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
 const paymentRepo = require('../repositories/payment.repo');
 const Submission = require('../models/Submission');
 const Assignment = require('../models/Assignment');
@@ -62,7 +58,7 @@ const resolveScope = async (user) => {
     const isCoach = user.roles.includes('COACH');
     let coachId = null;
     if (isCoach) {
-        const coach = await Coach.findOne({ user: user.id }).select('_id').lean();
+        const coach = await coachRepo.findByUser(user.id);
         coachId = coach ? coach._id : null;
     }
     return { userId: user.id, isAdmin, isCoach, coachId };
@@ -123,75 +119,18 @@ const listStudents = async (scope, filters) => {
     }
 
     const match = {};
-    if (!scope.isAdmin) match.coach = scope.coachId;
-    else if (filters.coachId) match.coach = new ObjectId(filters.coachId);
+    if (!scope.isAdmin) match.coach = String(scope.coachId);
+    else if (filters.coachId) match.coach = String(filters.coachId);
     if (filters.status) match.status = filters.status;
-    if (filters.courseId) match.course = new ObjectId(filters.courseId);
-    if (filters.groupId) match.group = new ObjectId(filters.groupId);
-
-    const userMatch = {};
-    if (filters.search) {
-        const re = new RegExp(escapeRegex(filters.search), 'i');
-        userMatch.$or = [{ 'user.firstName': re }, { 'user.lastName': re }, { 'user.email': re }];
-    }
+    if (filters.courseId) match.course = String(filters.courseId);
+    if (filters.groupId) match.group = String(filters.groupId);
 
     const skip = (filters.page - 1) * filters.limit;
-    const [result] = await TrainingContract.aggregate([
-        { $match: match },
-        { $sort: { createdAt: -1 } },
-        {
-            // Оплаты по контракту (индекс Payment.contract)
-            $lookup: {
-                from: Payment.collection.name,
-                localField: '_id',
-                foreignField: 'contract',
-                pipeline: [{ $match: { status: 'succeeded' } }, { $project: { amount: 1 } }],
-                as: 'payments',
-            },
-        },
-        {
-            $group: {
-                _id: '$student',
-                enrollments: {
-                    $push: {
-                        _id: '$_id',
-                        status: '$status',
-                        course: '$course',
-                        group: '$group',
-                        coach: '$coach',
-                        progress: { percentage: { $ifNull: ['$progress.percentage', 0] } },
-                        startDate: '$startDate',
-                        endDate: '$endDate',
-                        payment: { paid: { $gt: [{ $size: '$payments' }, 0] }, amountPaid: { $sum: '$payments.amount' } },
-                        createdAt: '$createdAt',
-                    },
-                },
-                lastEnrolledAt: { $max: '$createdAt' },
-            },
-        },
-        {
-            $lookup: {
-                from: User.collection.name,
-                localField: '_id',
-                foreignField: '_id',
-                pipeline: [{ $project: { uuid: 1, firstName: 1, lastName: 1, email: 1, phone: 1, avatarUrl: 1 } }],
-                as: 'user',
-            },
-        },
-        // Контракт без пользователя (пользователь удалён) не показываем — это битая ссылка
-        { $unwind: '$user' },
-        ...(filters.search ? [{ $match: userMatch }] : []),
-        { $sort: { 'user.lastName': 1, 'user.firstName': 1, _id: 1 } },
-        {
-            $facet: {
-                items: [{ $skip: skip }, { $limit: filters.limit }],
-                total: [{ $count: 'count' }],
-            },
-        },
-    ]);
-
-    const items = result.items;
-    const total = result.total[0]?.count ?? 0;
+    // Аггрегация listStudents (группировка по студенту + оплаты + поиск/сортировка/пагинация)
+    // переписана в шве как прикладной джойн — без кросс-БД $lookup на payments и users.
+    const { items, total } = await contractRepo.listStudentsForScope(match, {
+        skip, limit: filters.limit, search: filters.search,
+    });
 
     // Названия курсов и групп для всей страницы — двумя запросами
     const courseIds = new Set();
@@ -238,11 +177,8 @@ const getStudent = async (scope, uuid) => {
     // Себя студент видит целиком; тренер — только свою часть
     const coachFilter = !scope.isAdmin && !isSelf ? { coach: scope.coachId } : {};
 
-    const contracts = await TrainingContract.find({ student: student._id, ...coachFilter })
-        .populate('course', 'title level language')
-        .populate('group', 'name')
-        .sort({ createdAt: -1 })
-        .lean();
+    // Джойны course(title,level,language) + group(name) — в шве (app-level)
+    const contracts = await contractRepo.findStudentEnrollments(student._id, coachFilter.coach);
     if (!scope.isAdmin && !isSelf && contracts.length === 0) {
         throw notFound('Student not found.', 'STUDENT_NOT_FOUND');
     }
@@ -316,7 +252,7 @@ const loadGroupForCoach = async (groupId, coachId) => {
 /** Убирает студента из группы, только если его больше не связывает с ней ни один контракт */
 const releaseGroupMembership = async (studentId, groupId) => {
     if (!groupId) return;
-    const stillLinked = await TrainingContract.exists({ student: studentId, group: groupId });
+    const stillLinked = await contractRepo.exists({ student: studentId, group: groupId });
     if (!stillLinked) await Group.updateOne({ _id: groupId }, { $pull: { members: studentId } });
 };
 
@@ -350,7 +286,7 @@ const enrollStudent = async (scope, payload) => {
     if (scope.isAdmin) {
         coachId = payload.coachId ? new ObjectId(payload.coachId) : course.authors[0];
         if (!coachId) throw unprocessable('The course has no authors; pass coachId.', 'COACH_REQUIRED');
-        if (!(await Coach.exists({ _id: coachId }))) throw notFound('Coach not found.', 'COACH_NOT_FOUND');
+        if (!(await coachRepo.existsById(coachId))) throw notFound('Coach not found.', 'COACH_NOT_FOUND');
     } else {
         if (!course.authors.some((a) => String(a) === String(scope.coachId))) {
             throw forbidden('You can enroll students only into your own courses.', 'NOT_COURSE_AUTHOR');
@@ -358,7 +294,7 @@ const enrollStudent = async (scope, payload) => {
         coachId = scope.coachId;
     }
 
-    const coachUser = await Coach.findById(coachId).select('user').lean();
+    const coachUser = await coachRepo.findById(coachId);
     if (coachUser && String(coachUser.user) === String(student._id)) {
         throw unprocessable('A coach cannot be enrolled as their own student.', 'SELF_ENROLLMENT');
     }
@@ -369,7 +305,7 @@ const enrollStudent = async (scope, payload) => {
     const status = payload.status || (course.price?.amount > 0 ? 'pending_payment' : 'active');
     let contract;
     try {
-        contract = await TrainingContract.create({
+        contract = await contractRepo.create({
             student: student._id,
             course: course._id,
             coach: coachId,
@@ -380,7 +316,7 @@ const enrollStudent = async (scope, payload) => {
             endDate: payload.endDate,
         });
     } catch (e) {
-        if (e.code === 11000) throw conflict('The student is already enrolled in this course.', 'ALREADY_ENROLLED');
+        if (e.code === 'DUPLICATE_ENROLLMENT') throw conflict('The student is already enrolled in this course.', 'ALREADY_ENROLLED');
         throw e;
     }
     if (group) await Group.updateOne({ _id: group._id }, { $addToSet: { members: student._id } });
@@ -394,7 +330,7 @@ const enrollStudent = async (scope, payload) => {
 
 const loadContractInScope = async (scope, uuid, contractId) => {
     const student = await findStudentByUuid(uuid);
-    const contract = await TrainingContract.findOne({ _id: contractId, student: student._id }).lean();
+    const contract = await contractRepo.findOne({ _id: contractId, student: student._id });
     if (!contract || (!scope.isAdmin && String(contract.coach) !== String(scope.coachId))) {
         throw notFound('Enrollment not found.', 'ENROLLMENT_NOT_FOUND');
     }
@@ -435,10 +371,9 @@ const updateEnrollment = async (scope, uuid, contractId, payload) => {
     if (Object.keys(set).length === 0) return getStudent(scope, uuid);
 
     // Оптимистичная блокировка по статусу: параллельное изменение статуса не перетрётся молча
-    const updated = await TrainingContract.findOneAndUpdate(
+    const updated = await contractRepo.findOneAndUpdate(
         { _id: contract._id, status: contract.status },
-        { $set: set },
-        { new: true, runValidators: true },
+        set,
     );
     if (!updated) throw conflict('The enrollment was changed by someone else. Reload and try again.', 'CONCURRENT_UPDATE');
 
@@ -463,10 +398,10 @@ const deleteEnrollment = async (scope, uuid, contractId) => {
         throw conflict('The enrollment has a successful payment. Set its status to cancelled or refunded instead.', 'HAS_PAYMENTS');
     }
 
-    await TrainingContract.deleteOne({ _id: contract._id });
+    await contractRepo.deleteOne({ _id: contract._id });
     const futureLessons = await Schedule.find({ contract: contract._id, status: 'scheduled', date: { $gte: new Date() } }).distinct('_id');
     await Promise.all([
-        Payment.deleteMany({ contract: contract._id, status: { $ne: 'succeeded' } }),
+        paymentRepo.deleteUnsucceededForContract(contract._id),
         Schedule.deleteMany({ _id: { $in: futureLessons } }),
         // ДЗ к удалённым занятиям остаются (могли быть сдачи), но без ссылки на занятие
         Assignment.updateMany({ schedule: { $in: futureLessons } }, { $unset: { schedule: 1 } }),

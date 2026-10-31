@@ -7,7 +7,7 @@
 // Ошибки — ApiError -> { msg, code, details? } (errorHandlerV2).
 
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
-const Coach = require('../models/Coach');
+const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const CoachApplication = require('../models/CoachApplication');
 const { notify: emitNotification } = require('./notify');
 const { conflict, forbidden, notFound } = require('../utils/apiError');
@@ -139,11 +139,7 @@ const decide = async (user, applicationId, { status, adminNote }) => {
         }
         // Профиль заполнен данными заявки и сразу виден в каталоге:
         // одобрение заявки админом и есть проверка кандидата, отдельная верификация не нужна.
-        await Coach.findOneAndUpdate(
-            { user: applicant._id },
-            { $set: { ...seedFields(application), isVerified: true }, $setOnInsert: { user: applicant._id } },
-            { upsert: true, new: true, setDefaultsOnInsert: true },
-        );
+        await coachRepo.upsertByUser(applicant._id, { set: { ...seedFields(application), isVerified: true } });
     }
 
     application.status = status;

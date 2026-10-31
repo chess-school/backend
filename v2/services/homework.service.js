@@ -14,8 +14,8 @@ const Assignment = require('../models/Assignment');
 const Submission = require('../models/Submission');
 const Schedule = require('../models/Schedule');
 const Group = require('../models/Group');
-const Coach = require('../models/Coach');
-const TrainingContract = require('../models/TrainingContract');
+const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
+const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
 const { notify: emitNotification } = require('./notify');
 const PuzzleBook = require('../models/PuzzleBook');
 const { forbidden, notFound, conflict, unprocessable } = require('../utils/apiError');
@@ -27,7 +27,7 @@ const SUBMISSION_FIELDS = 'assignment student contentText attachment.contentType
 // =================================================================
 
 const getCoachId = async (userId) => {
-    const coach = await Coach.findOne({ user: userId }).select('_id').lean();
+    const coach = await coachRepo.findByUser(userId);
     return coach ? coach._id : null;
 };
 
@@ -49,7 +49,7 @@ const notify = ({ recipient, type, message, description, metadata }) =>
 const studentAudience = async (studentId) => {
     const [groupIds, courseIds] = await Promise.all([
         Group.find({ members: studentId }).distinct('_id'),
-        TrainingContract.find({ student: studentId, status: 'active' }).distinct('course'),
+        contractRepo.distinct('course', { student: studentId, status: 'active' }),
     ]);
     return {
         $or: [
@@ -323,7 +323,7 @@ const submitAssignment = async (user, assignmentId, payload, file, club) => {
         throw e;
     }
 
-    const coach = await Coach.findById(assignment.author).select('user').lean();
+    const coach = await coachRepo.findById(assignment.author);
     if (coach) {
         await notify({
             recipient: coach.user,

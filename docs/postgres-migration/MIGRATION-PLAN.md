@@ -158,11 +158,39 @@ pm2 reload chess-cluster
   roles/ratings/puzzle/profile/поиск — 23 проверки, с очисткой).
 - [ ] Флип: `node scripts/migrate-users.js` → `USER_DB=pg` → `pm2 reload`. Требует команды Никиты.
 
-### ⚠️ Два кросс-БД «ландмайна» — снять ДО/ПРИ флипе identity
-Эти места читают пользователей ВНУТРИ Mongo и не идут через шов (намеренно оставлены на Mongo,
-пока связанные домены не перенесены). При `USER_DB=pg` они будут читать stale/пустой testusers:
-1. `student.service.js` — аггрегация `$lookup { from: User.collection.name }` (contracts→testusers).
-   Снять, когда в PG будет домен **Coaching/TrainingContract** (джойн внутри PG или в приложении).
-2. `coach.controller.js getCoaches` — `Coach.find().populate('user', …)` (реф `TestUser`).
-   Снять при переносе домена **Coaching/Coach** (подтягивать карточку пользователя через шов).
-Поэтому **флип identity делать ВМЕСТЕ с Coaching** (или сначала переписать эти 2 чтения на шов).
+### Два кросс-БД «ландмайна» identity — СНЯТЫ доменом Coaching (ниже)
+~~1. student.service аггрегация $lookup→testusers~~ — переписана на прикладной джойн (userRepo).
+~~2. coach.controller getCoaches populate('user')~~ — заменён на coachRepo.findCatalog (app-level join).
+
+## Домен 4: Coaching (v2 Coach + TrainingContract) — ГОТОВ на уровне кода (не флипнут)
+- [x] Схема + миграция `add_coaching`: модели Coach, TrainingContract (enum ContractStatus).
+  `platformRating.average` — КОЛОНКА (по ней ORDER BY каталога); localized headline/bio/
+  specializations, fideProfile, payoutInfo, packageSnapshot — JSON; priceAtPurchase→priceAmount/
+  priceCurrency; progress→колонки. Уникальность (studentId,courseId).
+- [x] Швы `coach.repo.js` + `trainingContract.repo.js` (флаг `COACHING_DB=mongo|pg`). КЛЮЧЕВОЕ:
+  ВСЕ кросс-модельные джойны (coach→user, student→user, course, group, payment) делаются на
+  уровне ПРИЛОЖЕНИЯ (userRepo/paymentRepo/coachRepo/Mongo Course,Group) вместо populate/$lookup —
+  поэтому работают при любом сочетании флагов и снимают кросс-БД ландмайны.
+- [x] Аггрегация listStudents (группировка по студенту + оплаты + поиск/сортировка/фасетная
+  пагинация) ПЕРЕПИСАНА в trainingContract.repo.listStudentsForScope без $lookup (на users И payments)
+  — это снимало флип не только Identity, но и **Payment**.
+- [x] Рероут ВСЕХ потребителей Coach/TrainingContract (coach/admin/club/enrollment/schedule/group/
+  course/payment controllers; student/homework/chat/coachApplication/coachRequest services).
+  Прямых Coach.<метод>/TrainingContract.<метод> вызовов не осталось.
+- [x] Попутно: добавлен `paymentRepo.deleteUnsucceededForContract` (чинит латентный ReferenceError —
+  `Payment` использовался в student.service без импорта).
+- [x] ETL `scripts/migrate-coaching.js` (coaches + trainingcontracts, идемпотентно).
+- [x] Тесты 122/122 (mongo). PG-путь провалидирован смоуком (36 проверок, вкл. аггрегацию).
+- [ ] Флип: `node scripts/migrate-coaching.js` → `COACHING_DB=pg` → `pm2 reload`. Требует команды Никиты.
+
+## ⚠️ ОБЩАЯ находка: ландмайн-поверхность флипа ШИРЕ домена (sweep populate→app-join)
+Мигрированные домены (User/Coach/TrainingContract) используются как Mongoose-РЕФЫ в ДРУГИХ,
+ещё не мигрированных моделях. Их `.populate()` при флипе читает пустую Mongo-коллекцию. Перед
+ЛЮБЫМ флипом эти чтения надо переписать на прикладной джойн через швы. Известные (НЕ исчерпывающе):
+- `Group`/`Schedule` → `populate('coach' → 'user')` (club.controller:50/52, и др. по коду)
+- `CoachRequest` → `populate('coach' → 'user')`, `populate('student')` (coachRequest.service)
+- `Submission`/homework → `populate('student')` (homework.service) — ландмайн Identity
+- любые другие `.populate()`/`$lookup`, резолвящиеся в users/coaches/trainingcontracts.
+ДЕЙСТВИЕ: перед первым флипом прогнать `grep -rn "\.populate(\|\$lookup\|\.collection\.name" v2`
+и перевести каждый такой резолв в users/coaches/trainingcontracts на app-level join. Это отдельный
+кросс-срезовый шаг, НЕ привязанный к одному домену. Пока все флаги = mongo — всё консистентно.

@@ -233,3 +233,127 @@ model TrainingContract {
   @@index([clubId])
   @@map("trainingcontracts")
 }
+
+// --- Домен 5: Content (Course, PuzzleBook, SiteSettings, Puzzle, Position) ---
+// Клубный контент (Course/PuzzleBook/SiteSettings — мало строк) + справочная база задач
+// (Puzzle ~150k, Position ~994k — read-mostly). Кросс-ссылки (clubId/authorIds/createdById/
+// allowed*) БЕЗ Prisma-связей — Club/Coach(в PG)/Group/User джойнятся приложением через швы.
+// Вложенные структуры (modules→lessons, exercises, auth/footer/socials/menu) — JSON.
+// PK = строка Mongo ObjectId (у Puzzle/Position — исходный строковый _id: id задачи / FEN).
+
+model Course {
+  id          String  @id // Mongo ObjectId (hex)
+  clubId      String? // → clubs.id (Club в Mongo)
+  title       String
+  description String
+  thumbnailUrl String?
+
+  authorIds      String[] @default([]) // → coaches.id (массив, app-join)
+  isSchoolCourse Boolean  @default(false)
+
+  modules Json? // [{ title, description, lessons:[{title,description,contentType,content,durationMinutes}] }]
+
+  priceAmount   Int    @default(0) // minor units
+  priceCurrency String @default("USD")
+
+  status     String @default("draft") // draft|published|archived (легаси-флаг каталога)
+  visibility String @default("draft") // draft|private|group|public
+
+  allowedUserIds  String[] @default([]) // → users.id
+  allowedGroupIds String[] @default([]) // → groups.id (Group в Mongo)
+  isArchived      Boolean  @default(false)
+
+  level    String? // beginner|intermediate|advanced|expert
+  tags     String[] @default([])
+  language String   @default("en") // en|uk|pl
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clubId])
+  @@index([visibility, isArchived])
+  @@map("courses")
+}
+
+model PuzzleBook {
+  id          String  @id // Mongo ObjectId (hex)
+  clubId      String? // → clubs.id
+  title       String
+  description String  @default("")
+  createdById String // → users.id
+
+  solveSettings Json? // { hintsEnabled, hintUnlockMinutes, hintUnlockMistakes, allowShowSolution, showPlayerNames }
+
+  status     String @default("draft") // draft|published
+  visibility String @default("draft") // draft|private|group|public
+
+  allowedUserIds  String[] @default([])
+  allowedGroupIds String[] @default([])
+  isArchived      Boolean  @default(false)
+
+  sourceTaskId          String?  @unique // не больше одного задачника на задачу оцифровщика (sparse)
+  sourceImportedChapters String[] @default([])
+
+  exercises Json? // [{ _id, number, title, fen, comment, hint, solution, chapter, rating, ratingAttempts, meta }]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clubId])
+  @@index([visibility, isArchived])
+  @@map("puzzlebooks")
+}
+
+model SiteSettings {
+  id       String  @id // Mongo ObjectId (hex)
+  clubId   String  @unique // → clubs.id (одна запись на клуб)
+  siteName String?
+  logoUrl  String?
+  tagline  String?
+
+  auth    Json? // { promoTitle, promoSubtitle, backgroundUrl, buttonColor, facts:[{value,label}] }
+  footer  Json? // { text, legalName, links:[{label,url}] }
+  socials Json? // { facebook, instagram, twitter, youtube, telegram }
+  menu    Json? // [{ key, label, path, hidden, order }]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("sitesettings")
+}
+
+// База задач. У Lichess-задач source=null (moves[0] — ход соперника); у книжных — source.kind='book'.
+model Puzzle {
+  id         String   @id // исходный строковый _id задачи (Lichess id или ObjectId книги)
+  fen        String
+  moves      String[] @default([])
+  rating     Int
+  themes     String[] @default([])
+  popularity Int?
+  nbPlays    Int?
+
+  // source уплощён в колонки (по ним идут фильтры каталога книжных задач).
+  sourceKind           String? // 'book' | null
+  sourceBook           String? // → puzzlebooks.id
+  sourceBookTitle      String?
+  sourceExercise       String? // PuzzleBook.exercises._id
+  sourceExerciseNumber Int?
+  sourceTitle          String?
+  sourceSideToMove     String? // 'w' | 'b'
+  sourceSolutionSan    String[] @default([])
+  sourcePublished      Boolean? // ученикам видны только задачи опубликованных книг
+
+  @@index([rating])
+  @@index([sourceKind, sourcePublished, rating])
+  @@index([sourceBook])
+  @@map("puzzles")
+}
+
+// Дебютная/справочная статистика позиций: id = FEN, m = ходы со статистикой партий.
+model Position {
+  id String @id // FEN-строка
+  t  Int? // всего партий
+  m  Json? // [{ s:SAN, g:games, w:white, d:draw, l:loss }]
+
+  @@map("positions")
+}

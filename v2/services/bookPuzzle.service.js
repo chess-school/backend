@@ -8,8 +8,8 @@
 //   - ученики видят задачи только опубликованных книг (source.published).
 // Синхронизация идемпотентна: её можно вызывать после импорта глав, правки упражнения и смены статуса.
 
-const Puzzle = require('../models/Puzzle');
-const PuzzleBook = require('../models/PuzzleBook');
+const puzzleRepo = require('../repositories/puzzle.repo'); // шов content (mongo|pg по CONTENT_DB)
+const puzzleBookRepo = require('../repositories/puzzleBook.repo'); // шов content
 const { parseMainline } = require('../utils/pgnMainline');
 
 // У книжных задач нет рейтинга Lichess; ставим средний, чтобы они не выпадали из рейтинговых фильтров
@@ -57,43 +57,40 @@ const exerciseToPuzzle = (book, exercise) => {
  * @returns {{ published: number, skipped: Array<{ exerciseId, title, reason, detail? }> }}
  */
 const syncBookPuzzles = async (bookId) => {
-    const book = await PuzzleBook.findById(bookId).select('title status exercises').lean();
+    const book = await puzzleBookRepo.findById(bookId, { select: 'title status exercises' });
     if (!book) return { published: 0, skipped: [] };
 
-    const ops = [];
+    const puzzles = [];
     const keepIds = [];
     const skipped = [];
     for (const exercise of book.exercises) {
         const { puzzle, skipped: why } = exerciseToPuzzle(book, exercise);
         if (puzzle) {
             keepIds.push(puzzle._id);
-            ops.push({ replaceOne: { filter: { _id: puzzle._id }, replacement: puzzle, upsert: true } });
+            puzzles.push(puzzle);
         } else {
             skipped.push({ exerciseId: exercise._id, title: exercise.title, ...why });
         }
     }
-    if (ops.length) await Puzzle.bulkWrite(ops, { ordered: false });
-    await Puzzle.deleteMany({ 'source.book': book._id, _id: { $nin: keepIds } });
-    return { published: ops.length, skipped };
+    await puzzleRepo.replaceManyBookPuzzles(puzzles);
+    await puzzleRepo.deleteBookPuzzlesExcept(book._id, keepIds);
+    return { published: puzzles.length, skipped };
 };
 
 /** Синхронизация одного упражнения после правки в редакторе */
 const syncExercisePuzzle = async (book, exercise) => {
     const { puzzle, skipped } = exerciseToPuzzle(book, exercise);
     if (puzzle) {
-        await Puzzle.replaceOne({ _id: puzzle._id }, puzzle, { upsert: true });
+        await puzzleRepo.upsertPuzzle(puzzle);
         return { published: true };
     }
-    await Puzzle.deleteOne({ _id: puzzleIdFor(exercise._id) });
+    await puzzleRepo.deleteById(puzzleIdFor(exercise._id));
     return { published: false, ...skipped };
 };
 
 /** Публикация/снятие книги и смена названия отражаются на её задачах */
 const updateBookPuzzlesMeta = async (book) => {
-    await Puzzle.updateMany(
-        { 'source.book': book._id },
-        { $set: { 'source.published': book.status === 'published', 'source.bookTitle': book.title } },
-    );
+    await puzzleRepo.updateBookPuzzlesMeta(book._id, { published: book.status === 'published', bookTitle: book.title });
 };
 
 module.exports = {

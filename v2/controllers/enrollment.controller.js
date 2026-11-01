@@ -1,5 +1,5 @@
 const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching (mongo|pg по COACHING_DB)
-const Course = require('../models/Course');
+const courseRepo = require('../repositories/course.repo'); // шов content (mongo|pg по CONTENT_DB)
 const coachRepo = require('../repositories/coach.repo'); // шов coaching
 
 // =================================================================
@@ -16,7 +16,7 @@ const enrollInCourse = async (req, res) => {
     const studentId = req.user.id;
 
     // 1. Проверяем, существует ли курс и опубликован ли он (некорректный id -> 400 в errorHandlerV2)
-    const course = await Course.findOne({ _id: courseId, status: 'published' });
+    const course = await courseRepo.findPublishedById(courseId);
     if (!course) {
         return res.status(404).json({ msg: 'Published course not found.', code: 'COURSE_NOT_FOUND' });
     }

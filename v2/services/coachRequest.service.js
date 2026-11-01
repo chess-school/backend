@@ -9,7 +9,7 @@
 
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
-const Course = require('../models/Course');
+const courseRepo = require('../repositories/course.repo'); // шов content (mongo|pg по CONTENT_DB)
 const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
 const CoachRequest = require('../models/CoachRequest');
 const { notify: emitNotification } = require('./notify');
@@ -124,9 +124,9 @@ const DEFAULT_COURSE_TITLE = 'Individual lessons';
 
 /** courseId из запроса, либо персональный курс тренера (найти-или-создать). Возвращает id курса. */
 const resolveCourseForApproval = async (coachId) => {
-    const existing = await Course.findOne({ authors: coachId, title: DEFAULT_COURSE_TITLE }).select('_id').lean();
+    const existing = await courseRepo.findByAuthorAndTitle(coachId, DEFAULT_COURSE_TITLE);
     if (existing) return existing._id;
-    const created = await Course.create({
+    const created = await courseRepo.create({
         title: DEFAULT_COURSE_TITLE,
         description: 'Individual training sessions with your coach.',
         authors: [coachId],

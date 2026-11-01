@@ -4,7 +4,7 @@
 
 // Импортируем обе модели
 const Game = require('../models/Game');
-const Position = require('../models/Position');
+const positionRepo = require('../repositories/position.repo'); // шов content (mongo|pg по CONTENT_DB)
 
 /**
  * @desc    Получить данные дебютной книги по FEN позиции
@@ -14,7 +14,7 @@ const Position = require('../models/Position');
 const getOpeningBookByFen = async (req, res) => {
     try {
         const boardFen = req.params.fen.split(' ')[0];
-        const positionData = await Position.findById(boardFen);
+        const positionData = await positionRepo.findByFen(boardFen);
 
         if (!positionData) {
             return res.status(200).json({ success: true, data: { moves: [], total_games: 0 } });

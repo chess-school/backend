@@ -17,6 +17,7 @@
   "license": "ISC",
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.943.0",
+    "@aws-sdk/client-s3": "^3.1161.0",
     "@aws-sdk/lib-dynamodb": "^3.943.0",
     "@prisma/client": "^6.19.3",
     "@socket.io/redis-adapter": "^8.3.0",
@@ -43,6 +44,7 @@
     "nodemailer": "^10.2.1",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
+    "sharp": "^0.35.5",
     "socket.io": "^4.8.1",
     "stripe": "^18.3.0",
     "ws": "^8.18.0"

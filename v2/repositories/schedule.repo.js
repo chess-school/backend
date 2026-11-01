@@ -85,11 +85,13 @@ async function deleteOwn(id, coachId) {
 // Расписание пользователя: он студент индивидуального события, участник группы или тренер события.
 async function findForUser({ userId, groupIds = [], coachId = null, club = null, startDate, endDate }) {
   if (usePg()) {
-    const OR = [
-      { contextType: 'individual', contextRefId: s(userId) },
-      { contextType: 'group', contextRefId: { in: groupIds.map(s) } },
-    ];
+    // OR строим только из заданных критериев (contextRefId — NOT NULL, пустой in:[] безвреден,
+    // но равенство null невалидно) — иначе Prisma отвергает фильтр.
+    const OR = [];
+    if (userId) OR.push({ contextType: 'individual', contextRefId: s(userId) });
+    if (groupIds.length) OR.push({ contextType: 'group', contextRefId: { in: groupIds.map(s) } });
     if (coachId) OR.push({ coachId: s(coachId) });
+    if (!OR.length) return [];
     const where = { OR };
     if (club) where.clubId = s(club);
     if (startDate || endDate) { where.date = {}; if (startDate) where.date.gte = new Date(startDate); if (endDate) where.date.lte = new Date(endDate); }
@@ -109,13 +111,11 @@ async function findForUser({ userId, groupIds = [], coachId = null, club = null,
 // Ближайшие занятия студента (status scheduled, date>=now) — опц. в рамках одного тренера.
 async function findUpcomingForStudent({ coachId = null, studentId, groupIds = [], limit = 5 }) {
   if (usePg()) {
-    const where = {
-      status: 'scheduled', date: { gte: new Date() },
-      OR: [
-        { contextType: 'individual', contextRefId: s(studentId) },
-        { contextType: 'group', contextRefId: { in: groupIds.map(s) } },
-      ],
-    };
+    const OR = [];
+    if (studentId) OR.push({ contextType: 'individual', contextRefId: s(studentId) });
+    if (groupIds.length) OR.push({ contextType: 'group', contextRefId: { in: groupIds.map(s) } });
+    if (!OR.length) return [];
+    const where = { status: 'scheduled', date: { gte: new Date() }, OR };
     if (coachId) where.coachId = s(coachId);
     const rows = await prisma().scheduleV2.findMany({ where, orderBy: { date: 'asc' }, take: limit });
     return rows.map(pgRowToDoc);

@@ -11,6 +11,10 @@ const uploadImage = require('../middleware/uploadImage');
 const { forbidden } = require('../utils/apiError');
 const siteController = require('../controllers/site.controller');
 const mediaController = require('../controllers/media.controller');
+const pageController = require('../controllers/sitePage.controller');
+
+// Безопасный slug страницы в URL: буквы/цифры/дефис, 1–60 символов (напр. home, about, my-events).
+const PAGE_SLUG = /^[a-z0-9-]{1,60}$/i;
 
 // Только владелец клуба может править настройки сайта.
 const requireOwner = (req, res, next) => {
@@ -47,5 +51,31 @@ router.post('/media', authMiddleware, resolveClub, resolveClub.requireClub, requ
 // Удалить своё медиа.
 router.delete('/media/:id', authMiddleware, resolveClub, resolveClub.requireClub, requireStaff,
     validate([param('id').isMongoId().withMessage('id must be a valid id')]), mediaController.deleteMedia);
+
+// --- Страницы сайта из блоков (шаг 3) -------------------------------------------------------------
+
+const slugParam = validate([param('slug').matches(PAGE_SLUG).withMessage('slug must be a valid page slug')]);
+
+// Список страниц активного клуба (персонал). Регистрируем до /pages/:slug.
+router.get('/pages', authMiddleware, resolveClub, resolveClub.requireClub, requireStaff, pageController.listPages);
+
+// Черновик страницы для редактора (персонал). Две сегментации — отдельно от публичного /pages/:slug.
+router.get('/pages/admin/:slug', authMiddleware, resolveClub, resolveClub.requireClub, requireStaff,
+    slugParam, pageController.getAdminPage);
+
+// ПУБЛИЧНАЯ опубликованная страница клуба (по ?slug=<clubSlug> или X-Club-Id залогиненного).
+router.get('/pages/:slug', optionalAuth, slugParam, pageController.getPublicPage);
+
+// Создать/перезаписать черновик страницы (только владелец).
+router.put('/pages/:slug', authMiddleware, resolveClub, resolveClub.requireClub, requireOwner,
+    slugParam, pageController.savePage);
+
+// Опубликовать страницу (только владелец).
+router.post('/pages/:slug/publish', authMiddleware, resolveClub, resolveClub.requireClub, requireOwner,
+    slugParam, pageController.publishPage);
+
+// Удалить страницу (только владелец).
+router.delete('/pages/:slug', authMiddleware, resolveClub, resolveClub.requireClub, requireOwner,
+    slugParam, pageController.deletePage);
 
 module.exports = withErrorHandling(router);

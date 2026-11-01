@@ -203,13 +203,17 @@ const updateCourseStatus = async (req, res) => {
 //                     ПУБЛИЧНЫЕ ЭКШЕНЫ ДЛЯ ВСЕХ
 // =================================================================
 
-const AUTHOR_POPULATE = {
-    path: 'authors',
-    select: '-payoutInfo -__v -user', // Убираем ненужные поля
-    populate: {
-        path: 'user',
-        select: 'uuid firstName lastName avatarUrl' // Данные автора курса
-    }
+// authors[] (ссылки на Coach) → coach-доки с user-карточкой — app-level джойн через швы
+// (замена Mongoose populate('authors'→'user')). payoutInfo НЕ отдаём (как было select '-payoutInfo').
+const attachAuthors = async (courses) => {
+    const list = (Array.isArray(courses) ? courses : [courses]).filter(Boolean);
+    const ids = [...new Set(list.flatMap((c) => (c.authors || []).map(String)))];
+    if (!ids.length) { for (const c of list) c.authors = []; return courses; }
+    const coaches = await coachRepo.findManyByIds(ids);
+    await coachRepo.attachUsers(coaches); // coach.user = карточка {uuid,firstName,lastName,avatarUrl}
+    const byId = new Map(coaches.map((c) => { delete c.payoutInfo; delete c.__v; return [String(c._id), c]; }));
+    for (const c of list) c.authors = (c.authors || []).map((id) => byId.get(String(id)) || null).filter(Boolean);
+    return courses;
 };
 
 /**
@@ -237,11 +241,12 @@ const getPublicCourses = async (req, res) => {
     const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
 
     const coursesFromDB = await Course.find(query)
-        .populate(AUTHOR_POPULATE)
         .select('-__v')
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(parseInt(limit, 10));
+        .limit(parseInt(limit, 10))
+        .lean();
+    await attachAuthors(coursesFromDB); // джойн авторов — app-level через швы
 
     // Если запрашивали один курс по courseId, возвращаем его как объект
     if (courseId) {
@@ -282,13 +287,14 @@ const getCourseById = async (req, res) => {
 
     const accessFilter = await buildVisibilityFilter(req);
     const course = await Course.findOne({ _id: courseId, ...accessFilter })
-        .populate(AUTHOR_POPULATE)
-        .select('-__v');
+        .select('-__v')
+        .lean();
 
     if (!course) {
         return res.status(403).json({ msg: 'Forbidden: this course is private.', code: 'COURSE_FORBIDDEN' });
     }
 
+    await attachAuthors(course); // джойн авторов — app-level через швы
     res.json(course);
 };
 

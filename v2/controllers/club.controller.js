@@ -47,12 +47,16 @@ const getOverview = async (req, res) => {
         Club.findById(clubId).lean(),
         ClubMembership.countDocuments({ club: clubId, role: 'student', status: 'active' }),
         ClubMembership.countDocuments({ club: clubId, role: 'trainer', status: 'active' }),
-        Group.find({ club: clubId }).populate({ path: 'coach', populate: { path: 'user', select: 'firstName lastName' } }).lean(),
+        Group.find({ club: clubId }).lean(),
         Schedule.find({ club: clubId, date: { $gte: dayStart, $lt: dayEnd } })
-            .populate({ path: 'coach', populate: { path: 'user', select: 'firstName lastName' } }).sort({ date: 1 }).lean(),
+            .sort({ date: 1 }).lean(),
         Schedule.find({ club: clubId, 'context.type': 'group', date: { $gte: now } }).sort({ date: 1 }).lean(),
         paymentRepo.findByClub(clubId),
     ]);
+
+    // Джойн coach→user — app-level через шов (замена populate на обеих выборках)
+    await coachRepo.attachCoachField(groupsRaw);
+    await coachRepo.attachCoachField(todayRaw);
 
     // Ближайшее групповое занятие по каждой группе
     const nextByGroup = {};

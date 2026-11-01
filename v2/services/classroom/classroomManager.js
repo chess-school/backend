@@ -13,6 +13,7 @@ const { Chess } = require('chess.js');
 const { getClient, isClustered, withRedisLock } = require('../play/redis');
 const Group = require('../../models/Group');
 const Schedule = require('../../models/Schedule');
+const coachRepo = require('../../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const { notFound, forbidden, badRequest } = require('../../utils/apiError');
 
 // roomId — непрозрачный ключ комнаты: для группы это её _id, для индивидуального урока — `lesson-<eventId>`.
@@ -102,8 +103,10 @@ const authorize = async (roomId, user) => {
 
     if (isLessonRoom(roomId)) {
         const eventId = String(roomId).slice(LESSON_PREFIX.length);
-        const event = await Schedule.findById(eventId).select('coach context').populate('coach', 'user');
+        const event = await Schedule.findById(eventId).select('coach context').lean();
         if (!event) throw notFound('Classroom not found.', 'CLASSROOM_NOT_FOUND');
+        // coach={_id,user} — app-level джойн через шов (замена populate('coach','user'))
+        if (event.coach) { const [c] = await coachRepo.findByIds([event.coach]); event.coach = c || null; }
         if (!event.context || event.context.type !== 'individual') {
             throw forbidden('This classroom is not an individual lesson.', 'NOT_AN_INDIVIDUAL_LESSON');
         }
@@ -117,8 +120,10 @@ const authorize = async (roomId, user) => {
         return { role: isCoach || isAdmin ? 'coach' : 'student', coachUserId };
     }
 
-    const group = await Group.findById(roomId).populate('coach', 'user').select('coach members status');
+    const group = await Group.findById(roomId).select('coach members status').lean();
     if (!group) throw notFound('Classroom not found.', 'CLASSROOM_NOT_FOUND');
+    // coach={_id,user} — app-level джойн через шов (замена populate('coach','user'))
+    if (group.coach) { const [c] = await coachRepo.findByIds([group.coach]); group.coach = c || null; }
     const coachUserId = group.coach ? String(group.coach.user) : null;
     const isCoach = coachUserId === user.id;
     const isMember = group.members.some((m) => String(m) === user.id);

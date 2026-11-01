@@ -13,7 +13,6 @@ const { notify: emitNotification } = require('./notify');
 const { conflict, forbidden, notFound } = require('../utils/apiError');
 
 const SUPPORTED_LANGS = ['en', 'uk', 'pl'];
-const PUBLIC_USER = 'uuid firstName lastName avatarUrl email phone';
 
 // Через общий сервис (репозиторий-шов mongo|pg). Ошибки он уже глотает сам.
 const notify = (recipient, type, message, link) => emitNotification({ recipient, type, message, link });
@@ -97,8 +96,10 @@ const list = async (user, { status } = {}, club) => {
     const applications = await CoachApplication.find(filter)
         .sort({ createdAt: -1 })
         .limit(300)
-        .populate('applicant', PUBLIC_USER)
         .lean();
+    // джойн applicant — app-level через шов (замена populate('applicant', PUBLIC_USER))
+    const map = await userRepo.userCardMap(applications.map((a) => a.applicant), ['uuid', 'firstName', 'lastName', 'avatarUrl', 'email', 'phone']);
+    for (const a of applications) a.applicant = a.applicant ? (map.get(String(a.applicant)) || null) : null;
     const order = { pending: 0, approved: 1, rejected: 2 };
     return applications.sort((a, b) => order[a.status] - order[b.status]).map(toDto);
 };

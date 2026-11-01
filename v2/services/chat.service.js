@@ -20,7 +20,15 @@ const { emitToUsers } = require('./chatRealtime');
 const { ObjectId } = mongoose.Types;
 
 const CHAT_STATUSES = ['pending_payment', 'pending_approval', 'active', 'completed'];
-const PUBLIC_USER = 'uuid firstName lastName avatarUrl';
+const MEMBER_CARD = ['uuid', 'firstName', 'lastName', 'avatarUrl'];
+
+// room.members = карточки пользователей — app-level джойн через шов (замена populate('members')).
+const attachMembers = async (rooms) => {
+    const list = (Array.isArray(rooms) ? rooms : [rooms]).filter(Boolean);
+    const map = await userRepo.userCardMap(list.flatMap((r) => (r.members || []).map(String)), MEMBER_CARD);
+    for (const r of list) r.members = (r.members || []).map((id) => map.get(String(id)) || null).filter(Boolean);
+    return rooms;
+};
 const PAGE_DEFAULT = 30;
 const PAGE_MAX = 100;
 
@@ -113,9 +121,9 @@ const unreadByRoom = async (userId, roomIds) => {
 
 const listRooms = async (user) => {
     const rooms = await ChatRoom.find({ members: user.id })
-        .populate('members', PUBLIC_USER)
         .sort({ lastMessageAt: -1, updatedAt: -1 })
         .lean();
+    await attachMembers(rooms); // джойн участников — app-level через шов
     const unread = await unreadByRoom(user.id, rooms.map((r) => r._id));
     return rooms.map((r) => toRoomDto(r, user.id, unread.get(String(r._id)) || 0));
 };
@@ -153,7 +161,8 @@ const openRoom = async (user, { userId: otherId, context }) => {
             room = await ChatRoom.findOne({ key }).lean(); // параллельный запрос успел первым
         }
     }
-    const populated = await ChatRoom.findById(room._id).populate('members', PUBLIC_USER).lean();
+    const populated = await ChatRoom.findById(room._id).lean();
+    await attachMembers(populated); // джойн участников — app-level через шов
     const unread = await unreadByRoom(user.id, [room._id]);
     return { room: toRoomDto(populated, user.id, unread.get(String(room._id)) || 0), created };
 };

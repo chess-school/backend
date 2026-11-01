@@ -16,7 +16,6 @@ const { notify: emitNotification } = require('./notify');
 const studentService = require('./student.service');
 const { conflict, forbidden, notFound, unprocessable } = require('../utils/apiError');
 
-const PUBLIC_USER = 'uuid firstName lastName avatarUrl email';
 // Ученик уже занимается с тренером — новая заявка не нужна
 const LINKED_STATUSES = ['pending_payment', 'pending_approval', 'active'];
 
@@ -40,6 +39,25 @@ const toDto = (r) => ({
 
 // Через общий сервис (репозиторий-шов mongo|pg). Ошибки он уже глотает сам.
 const notify = (recipient, type, message, link) => emitNotification({ recipient, type, message, link });
+
+// Прикладные джойны (замена Mongoose populate — работают при mongo|pg, снимают кросс-БД ландмайн).
+const STUDENT_CARD = ['uuid', 'firstName', 'lastName', 'avatarUrl', 'email'];
+// request.student = карточка пользователя (populate('student', PUBLIC_USER)).
+const attachStudents = async (requests) => {
+    const list = (Array.isArray(requests) ? requests : [requests]).filter(Boolean);
+    const map = await userRepo.userCardMap(list.map((r) => r.student), STUDENT_CARD);
+    for (const r of list) r.student = r.student ? (map.get(String(r.student)) || null) : null;
+    return requests;
+};
+// request.coach = { _id, user: карточка } (populate coach→user).
+const attachCoaches = async (requests) => {
+    const list = (Array.isArray(requests) ? requests : [requests]).filter(Boolean);
+    const coaches = await coachRepo.findByIds([...new Set(list.map((r) => r.coach).filter(Boolean).map(String))]);
+    await coachRepo.attachUsers(coaches);
+    const byId = new Map(coaches.map((c) => [String(c._id), c]));
+    for (const r of list) r.coach = r.coach ? (byId.get(String(r.coach)) || null) : null;
+    return requests;
+};
 
 /** Ученик отправляет заявку тренеру (coachId — id профиля Coach) */
 const createRequest = async (user, coachId, { experience, goals }, club) => {
@@ -69,8 +87,8 @@ const createRequest = async (user, coachId, { experience, goals }, club) => {
 const listSentRequests = async (user) => {
     const requests = await CoachRequest.find({ student: user.id })
         .sort({ createdAt: -1 })
-        .populate({ path: 'coach', select: 'user', populate: { path: 'user', select: PUBLIC_USER } })
         .lean();
+    await attachCoaches(requests); // джойн coach→user — app-level через шов
     return requests.map(toDto);
 };
 
@@ -94,8 +112,8 @@ const listCoachRequests = async (user, { status } = {}, club) => {
     const requests = await CoachRequest.find(filter)
         .sort({ createdAt: -1 })
         .limit(200)
-        .populate('student', PUBLIC_USER)
         .lean();
+    await attachStudents(requests); // джойн student — app-level через шов
     const order = { pending: 0, approved: 1, rejected: 2 };
     return requests.sort((a, b) => order[a.status] - order[b.status]).map(toDto);
 };
@@ -125,7 +143,8 @@ const resolveCourseForApproval = async (coachId) => {
  */
 const decideRequest = async (user, requestId, { status, courseId }) => {
     const coachId = await coachScope(user);
-    const request = await CoachRequest.findById(requestId).populate('student', PUBLIC_USER).lean();
+    const request = await CoachRequest.findById(requestId).lean();
+    if (request) await attachStudents(request); // джойн student — app-level через шов
     if (!request || (!isAdmin(user) && String(request.coach) !== String(coachId))) {
         throw notFound('Request not found.', 'REQUEST_NOT_FOUND');
     }
@@ -146,8 +165,9 @@ const decideRequest = async (user, requestId, { status, courseId }) => {
         { _id: request._id, status: 'pending' },
         { $set: { status, decidedAt: new Date(), enrollment } },
         { new: true },
-    ).populate('student', PUBLIC_USER).lean();
+    ).lean();
     if (!updated) throw conflict('This request has already been decided.', 'REQUEST_ALREADY_DECIDED');
+    await attachStudents(updated); // джойн student — app-level через шов
 
     await notify(
         request.student._id, 'COACH_REQUEST_DECIDED',

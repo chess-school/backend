@@ -138,6 +138,24 @@ async function findByIdList(ids) {
     .sort({ lastName: 1, firstName: 1 }).lean()).map(stripSecret);
 }
 
+// Карточка пользователя: _id + выбранные поля (аналог populate('<ref>', '<fields>')).
+// Отсутствующих полей в карточке нет (кладём null), чтобы форма совпадала с Mongoose-populate.
+function pickUser(u, fields) {
+  if (!u) return null;
+  const card = { _id: u._id };
+  for (const f of fields) card[f] = u[f] ?? null;
+  return card;
+}
+
+// Батч-джойн: Map<idString, карточка> по массиву id. Прикладная замена Mongoose populate
+// на поле со ссылкой на TestUser — работает одинаково при mongo|pg (снимает кросс-БД ландмайн).
+async function userCardMap(ids, fields) {
+  const list = [...new Set((ids || []).filter(Boolean).map(String))];
+  if (!list.length) return new Map();
+  const users = await findByIdList(list);
+  return new Map(users.map((u) => [String(u._id), pickUser(u, fields)]));
+}
+
 async function findByEmailList(emails) {
   const list = (emails || []).map((e) => String(e).toLowerCase());
   if (usePg()) {
@@ -476,6 +494,8 @@ module.exports = {
   // чтения
   findById, findByUuid, findByEmail, findByIdList, findByEmailList,
   findByNameWords, findAdmins, findMany, count, existsById,
+  // прикладной джойн (замена populate на ссылку → TestUser)
+  pickUser, userCardMap,
   // auth/сессия
   findByEmailForAuth, findByIdForAuth, findByVerificationToken, comparePassword,
   create, incrementSessionTokenVersion, markEmailVerified, setVerificationToken, updatePassword,

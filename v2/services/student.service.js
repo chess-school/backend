@@ -17,9 +17,9 @@ const courseRepo = require('../repositories/course.repo'); // шов content (mo
 const Group = require('../models/Group');
 const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
 const paymentRepo = require('../repositories/payment.repo');
-const Submission = require('../models/Submission');
-const Assignment = require('../models/Assignment');
-const Schedule = require('../models/Schedule');
+const submissionRepo = require('../repositories/submission.repo'); // шов learning (mongo|pg по LEARNING_DB)
+const assignmentRepo = require('../repositories/assignment.repo'); // шов learning
+const scheduleRepo = require('../repositories/schedule.repo'); // шов learning
 const { badRequest, forbidden, notFound, conflict, unprocessable } = require('../utils/apiError');
 
 const { ObjectId } = mongoose.Types;
@@ -190,22 +190,18 @@ const getStudent = async (scope, uuid) => {
     const [payments, groups, assignmentIds] = await Promise.all([
         paymentRepo.findByContracts(contractIds),
         Group.find(groupsFilter).select('name status coach').lean(),
-        assignmentFilter ? Assignment.find(assignmentFilter).distinct('_id') : Promise.resolve(null),
+        assignmentFilter ? assignmentRepo.distinctIdsByAuthor({ author: coachFilter.coach }) : Promise.resolve(null),
     ]);
     const groupIds = groups.map((g) => g._id);
 
-    const submissionMatch = { student: student._id, ...(assignmentIds ? { assignment: { $in: assignmentIds } } : {}) };
     const [submissionStats, upcoming] = await Promise.all([
-        Submission.aggregate([{ $match: submissionMatch }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
-        Schedule.find({
-            ...coachFilter,
-            status: 'scheduled',
-            date: { $gte: new Date() },
-            $or: [
-                { 'context.type': 'individual', 'context.refId': student._id },
-                { 'context.type': 'group', 'context.refId': { $in: groupIds } },
-            ],
-        }).select('title date durationMinutes link context').sort({ date: 1 }).limit(5).lean(),
+        submissionRepo.statusCounts({ student: student._id, assignmentIds }),
+        scheduleRepo.findUpcomingForStudent({
+            coachId: coachFilter.coach || null,
+            studentId: student._id,
+            groupIds,
+            limit: 5,
+        }),
     ]);
 
     const paymentsByContract = new Map();
@@ -399,12 +395,12 @@ const deleteEnrollment = async (scope, uuid, contractId) => {
     }
 
     await contractRepo.deleteOne({ _id: contract._id });
-    const futureLessons = await Schedule.find({ contract: contract._id, status: 'scheduled', date: { $gte: new Date() } }).distinct('_id');
+    const futureLessons = await scheduleRepo.distinctIdsByContract(contract._id);
     await Promise.all([
         paymentRepo.deleteUnsucceededForContract(contract._id),
-        Schedule.deleteMany({ _id: { $in: futureLessons } }),
+        scheduleRepo.deleteManyByIds(futureLessons),
         // ДЗ к удалённым занятиям остаются (могли быть сдачи), но без ссылки на занятие
-        Assignment.updateMany({ schedule: { $in: futureLessons } }, { $unset: { schedule: 1 } }),
+        assignmentRepo.clearScheduleByIds(futureLessons),
         releaseGroupMembership(student._id, contract.group),
     ]);
 };

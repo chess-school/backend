@@ -1,9 +1,9 @@
-const Schedule = require('../models/Schedule');
+const scheduleRepo = require('../repositories/schedule.repo'); // шов learning (mongo|pg по LEARNING_DB)
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const Group = require('../models/Group');
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
-const Assignment = require('../models/Assignment');
+const assignmentRepo = require('../repositories/assignment.repo'); // шов learning
 const { notifyLessonScheduled } = require('../services/lessonNotify.service');
 
 // Индивидуальное занятие можно назначить только по действующей записи студента у этого тренера
@@ -66,7 +66,7 @@ const createScheduleEvent = async (req, res) => {
         recipients = group.members || [];
     }
 
-    const newEvent = await Schedule.create({
+    const newEvent = await scheduleRepo.create({
         title, description, date, durationMinutes, link,
         coach: coachProfile._id,
         context,
@@ -94,7 +94,7 @@ const createScheduleEvent = async (req, res) => {
         }
     }
 
-    res.status(201).json({ ...newEvent.toObject(), notified });
+    res.status(201).json({ ...newEvent, notified });
 };
 
 
@@ -114,30 +114,15 @@ const getMySchedule = async (req, res) => {
     ]);
     const groupIds = userGroups.map(g => g._id);
 
-    const query = {
-        $or: [
-            // Либо я - студент в индивидуальном событии
-            { 'context.type': 'individual', 'context.refId': userId },
-            // Либо это событие для одной из моих групп
-            { 'context.type': 'group', 'context.refId': { $in: groupIds } },
-            // Либо я - тренер, который ведет это событие
-            ...(coachProfile ? [{ coach: coachProfile._id }] : [])
-        ]
-    };
-
-    // Изоляция по клубу (#7): если активный клуб определён — только его события
-    if (req.club) query.club = req.club;
-
-    // Фильтр по датам: можно передать только одну границу
-    if (startDate || endDate) {
-        query.date = {};
-        if (startDate) query.date.$gte = new Date(startDate);
-        if (endDate) query.date.$lte = new Date(endDate);
-    }
-
-    const events = await Schedule.find(query)
-        .sort({ date: 'asc' })
-        .lean();
+    // Расписание пользователя (студент индивид./участник группы/тренер) — через шов learning.
+    const events = await scheduleRepo.findForUser({
+        userId,
+        groupIds,
+        coachId: coachProfile ? coachProfile._id : null,
+        club: req.club || null,
+        startDate,
+        endDate,
+    });
     await coachRepo.attachCoachField(events); // джойн coach→user — app-level через шов
 
     // context.refId указывает то на группу, то на пользователя (ref у поля нет) — подтягиваем
@@ -173,11 +158,7 @@ const updateScheduleEvent = async (req, res) => {
     }
 
     // Находим и обновляем, только если я - тренер этого события
-    const updatedEvent = await Schedule.findOneAndUpdate(
-        { _id: eventId, coach: coachProfile._id },
-        { $set: updateData },
-        { new: true, runValidators: true }
-    );
+    const updatedEvent = await scheduleRepo.updateOwn(eventId, coachProfile._id, updateData);
 
     if (!updatedEvent) {
         return res.status(404).json({ msg: req.t('controllers.schedule.eventNotFoundOrNotEditable'), code: 'EVENT_NOT_FOUND' });
@@ -196,13 +177,13 @@ const deleteScheduleEvent = async (req, res) => {
     const coachProfile = await requireCoach(req, res);
     if (!coachProfile) return;
 
-    const result = await Schedule.findOneAndDelete({ _id: eventId, coach: coachProfile._id });
+    const result = await scheduleRepo.deleteOwn(eventId, coachProfile._id);
 
     if (!result) {
         return res.status(404).json({ msg: req.t('controllers.schedule.eventNotFoundOrNotDeletable'), code: 'EVENT_NOT_FOUND' });
     }
     // ДЗ занятия остаётся (по нему могли уже сдать работы), но больше не ссылается на удалённое занятие
-    await Assignment.updateMany({ schedule: result._id }, { $unset: { schedule: 1 } });
+    await assignmentRepo.clearScheduleByIds([result._id]);
 
     res.json({ msg: req.t('controllers.schedule.eventDeletedSuccess') });
 };

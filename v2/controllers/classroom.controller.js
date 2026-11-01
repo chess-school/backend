@@ -14,7 +14,7 @@
 const { AccessToken, TrackSource, WebhookReceiver } = require('livekit-server-sdk');
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const scheduleRepo = require('../repositories/schedule.repo'); // шов learning (mongo|pg по LEARNING_DB)
-const ClassroomSession = require('../models/ClassroomSession');
+const classroomRepo = require('../repositories/classroomSession.repo'); // шов play (mongo|pg по PLAY_DB)
 const { authorize, roomIdForLesson } = require('../services/classroom/classroomManager');
 const { handleLivekitEvent } = require('../services/classroom/livekitWebhook');
 const { notFound, forbidden, badRequest } = require('../utils/apiError');
@@ -98,30 +98,11 @@ const enterFromSchedule = async (req, res) => {
     const { role } = await authorize(roomId, req.user);
 
     // Идемпотентный вход: одна live-сессия на событие (partial-unique индекс schedule+status страхует гонку)
-    let session;
-    try {
-        session = await ClassroomSession.findOneAndUpdate(
-            { schedule: eventId, status: 'live' },
-            { $setOnInsert: { group: groupId, student, coach: event.coach, schedule: eventId, status: 'live', startedAt: new Date(), attendance: [], ...(req.club ? { club: req.club } : {}) } },
-            { new: true, upsert: true, setDefaultsOnInsert: true }
-        );
-    } catch (e) {
-        if (e.code === 11000) session = await ClassroomSession.findOne({ schedule: eventId, status: 'live' });
-        else throw e;
-    }
+    const session = await classroomRepo.ensureLive({ schedule: eventId, group: groupId, student, coach: event.coach, club: req.club || null });
 
     // Отметка присутствия атомарно (без load-modify-save, чтобы параллельные входы не затирали друг друга)
     const now = new Date();
-    const touched = await ClassroomSession.updateOne(
-        { _id: session._id, 'attendance.user': req.user.id },
-        { $set: { 'attendance.$.lastSeenAt': now, 'attendance.$.leftAt': null } }
-    );
-    if (touched.matchedCount === 0) {
-        await ClassroomSession.updateOne(
-            { _id: session._id, 'attendance.user': { $ne: req.user.id } },
-            { $push: { attendance: { user: req.user.id, role, joinedAt: now, lastSeenAt: now, leftAt: null } } }
-        );
-    }
+    await classroomRepo.joinAttendance(session._id, req.user.id, role, now);
 
     return res.status(200).json({
         sessionId: String(session._id),
@@ -140,20 +121,14 @@ const enterFromSchedule = async (req, res) => {
  */
 const endSession = async (req, res) => {
     const { sessionId } = req.params;
-    const session = await ClassroomSession.findById(sessionId);
+    let session = await classroomRepo.findById(sessionId);
     if (!session) throw notFound('Classroom session not found.', 'SESSION_NOT_FOUND');
 
     const roomId = session.group ? String(session.group) : roomIdForLesson(String(session.schedule));
     const { role } = await authorize(roomId, req.user);
     if (role !== 'coach') throw forbidden('Only the coach can end the session.', 'NOT_COACH');
 
-    if (session.status !== 'ended') {
-        const now = new Date();
-        session.status = 'ended';
-        session.endedAt = now;
-        session.attendance.forEach((a) => { if (!a.leftAt) a.leftAt = now; });
-        await session.save();
-    }
+    if (session.status !== 'ended') session = await classroomRepo.end(sessionId, new Date());
     return res.status(200).json({ sessionId: String(session._id), status: session.status, endedAt: session.endedAt });
 };
 
@@ -166,11 +141,7 @@ const listSessions = async (req, res) => {
     const groupId = req.params.id;
     await authorize(groupId, req.user); // бросит 403/404, если не участник/группа удалена
 
-    const sessions = await ClassroomSession.find({ group: groupId })
-        .sort({ startedAt: -1 })
-        .limit(100)
-        .select('status startedAt endedAt schedule attendance')
-        .lean();
+    const sessions = await classroomRepo.listByGroup(groupId, 100);
 
     const data = sessions.map((s) => ({
         sessionId: String(s._id),

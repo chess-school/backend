@@ -9,7 +9,7 @@
 //     предложил реванш — он принимается сразу;
 //   — партия из очереди автоподбора создаётся сразу активной (createPairedGame).
 
-const LiveGame = require('../../models/LiveGame');
+const liveGameRepo = require('../../repositories/liveGame.repo'); // шов play (mongo|pg по PLAY_DB)
 const userRepo = require('../../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const { buildTimeControl, LIMITS } = require('../../utils/timeControl');
 const { DEFAULT_RATING, isProvisional } = require('../../utils/ratingCalculator');
@@ -79,10 +79,10 @@ const challengeDto = (doc, me) => {
 const createChallenge = async (user, { minutes, increment, rated = true, color = 'random', isPrivate = true, ratingRange = null, source = 'challenge', rematchOf = null }) => {
     const tc = timeControlOrThrow(minutes, increment);
     if (!isPrivate) {
-        const open = await LiveGame.countDocuments({ createdBy: user.id, status: 'created', isPrivate: false, createdAt: { $gt: new Date(Date.now() - OPEN_CHALLENGE_TTL_MS) } });
+        const open = await liveGameRepo.countOpenChallenges(user.id, OPEN_CHALLENGE_TTL_MS);
         if (open >= MAX_OPEN_CHALLENGES) throw conflict(`You can have at most ${MAX_OPEN_CHALLENGES} open challenges.`, 'TOO_MANY_CHALLENGES');
     }
-    const doc = await LiveGame.create({
+    const doc = await liveGameRepo.create({
         createdBy: user.id,
         creatorColor: color,
         source,
@@ -93,15 +93,14 @@ const createChallenge = async (user, { minutes, increment, rated = true, color =
         ratingRange: !isPrivate && ratingRange ? Number(ratingRange) : null,
         rematchOf,
     });
-    const populated = await LiveGame.findById(doc._id).lean();
+    const populated = await liveGameRepo.findById(doc._id);
     await attachCreator(populated); // джойн createdBy — app-level через шов
     return challengeDto(populated, user.id);
 };
 
 /** Открытые вызовы лобби (свои — тоже, с mine: true) */
 const listOpenChallenges = async (user) => {
-    const docs = await LiveGame.find({ status: 'created', isPrivate: false, createdAt: { $gt: new Date(Date.now() - OPEN_CHALLENGE_TTL_MS) } })
-        .sort({ createdAt: -1 }).limit(100).lean();
+    const docs = await liveGameRepo.findOpenChallenges(OPEN_CHALLENGE_TTL_MS, 100);
     await attachCreator(docs); // джойн createdBy — app-level через шов
     return docs.map((d) => challengeDto(d, user?.id));
 };
@@ -112,7 +111,7 @@ const assignColors = (creatorColor, creatorId, acceptorId) => {
 };
 
 const startActive = async (filter, set) => {
-    const doc = await LiveGame.findOneAndUpdate(filter, { $set: { ...set, status: 'active', startedAt: new Date() } }, { new: true }).lean();
+    const doc = await liveGameRepo.startActive(filter._id, set);
     if (!doc) return null;
     getGameManager().activate(doc);
     for (const uid of [doc.whitePlayer, doc.blackPlayer]) emitToUser(String(uid), 'game_started', { gameId: String(doc._id) });
@@ -121,7 +120,7 @@ const startActive = async (filter, set) => {
 
 /** Принять вызов -> { gameId } */
 const acceptChallenge = async (user, challengeId) => {
-    const doc = await LiveGame.findById(challengeId).lean();
+    const doc = await liveGameRepo.findById(challengeId);
     if (!doc) throw notFound('Challenge not found.', 'CHALLENGE_NOT_FOUND');
     await attachCreator(doc); // джойн createdBy — app-level через шов
     if (doc.status !== 'created') throw conflict('This challenge has already been accepted or cancelled.', 'CHALLENGE_TAKEN');
@@ -147,15 +146,15 @@ const acceptChallenge = async (user, challengeId) => {
 
 /** Отозвать свой вызов */
 const cancelChallenge = async (user, challengeId) => {
-    const res = await LiveGame.updateOne({ _id: challengeId, createdBy: user.id, status: 'created' }, { $set: { status: 'aborted', endReason: 'aborted', finishedAt: new Date() } });
-    if (res.matchedCount === 0) throw notFound('Challenge not found.', 'CHALLENGE_NOT_FOUND');
+    const ok = await liveGameRepo.cancelOwnChallenge(challengeId, user.id);
+    if (!ok) throw notFound('Challenge not found.', 'CHALLENGE_NOT_FOUND');
     return { cancelled: true };
 };
 
 /** Партия из очереди автоподбора: сразу активна, цвета случайные */
 const createPairedGame = async (userA, userB, tc, rated) => {
     const colors = assignColors('random', userA, userB);
-    const created = await LiveGame.create({
+    const created = await liveGameRepo.create({
         createdBy: userA, creatorColor: 'random', source: 'pairing', isPrivate: true, isRated: !!rated,
         timeControl: tc, clock: initialClock(tc),
     });
@@ -165,7 +164,7 @@ const createPairedGame = async (userA, userB, tc, rated) => {
 
 /** Реванш: предложить или (если соперник уже предложил) принять -> { gameId, accepted } */
 const rematch = async (user, gameId) => {
-    const old = await LiveGame.findById(gameId).lean();
+    const old = await liveGameRepo.findById(gameId);
     if (!old) throw notFound('Game not found.', 'GAME_NOT_FOUND');
     const me = String(user.id);
     const myColor = String(old.whitePlayer) === me ? 'white' : String(old.blackPlayer) === me ? 'black' : null;
@@ -173,9 +172,9 @@ const rematch = async (user, gameId) => {
     if (!['finished', 'aborted'].includes(old.status) || !old.whitePlayer || !old.blackPlayer) throw conflict('Rematch is available after the game ends.', 'GAME_NOT_FINISHED');
     const opponent = String(myColor === 'white' ? old.blackPlayer : old.whitePlayer);
 
-    const offered = await LiveGame.findOne({ rematchOf: old._id, status: 'created', createdBy: opponent }).lean();
+    const offered = await liveGameRepo.findRematchOffer(old._id, opponent);
     if (offered) return { ...(await acceptChallenge(user, offered._id)), accepted: true };
-    const mine = await LiveGame.findOne({ rematchOf: old._id, status: 'created', createdBy: me }).lean();
+    const mine = await liveGameRepo.findRematchOffer(old._id, me);
     if (mine) return { gameId: String(mine._id), accepted: false };
 
     const dto = await createChallenge(user, {
@@ -197,9 +196,8 @@ const rematch = async (user, gameId) => {
 const overview = async (user) => {
     const [me, active, challenges] = await Promise.all([
         userRepo.findRatings(user.id),
-        LiveGame.find({ status: 'active', $or: [{ whitePlayer: user.id }, { blackPlayer: user.id }] }).select('_id timeControl').lean(),
-        LiveGame.find({ status: 'created', createdBy: user.id, createdAt: { $gt: new Date(Date.now() - PRIVATE_CHALLENGE_TTL_MS) } })
-            .sort({ createdAt: -1 }).limit(10).lean(),
+        liveGameRepo.findActiveForUser(user.id),
+        liveGameRepo.findCreatedForUser(user.id, PRIVATE_CHALLENGE_TTL_MS, 10),
     ]);
     await attachCreator(challenges); // джойн createdBy — app-level через шов
     const ratings = {};
@@ -216,8 +214,7 @@ const overview = async (user) => {
 
 /** Мои последние партии */
 const myGames = async (user, { limit = 20 } = {}) => {
-    const docs = await LiveGame.find({ status: { $in: ['finished', 'aborted'] }, $or: [{ whitePlayer: user.id }, { blackPlayer: user.id }] })
-        .sort({ finishedAt: -1 }).limit(Math.min(50, limit)).lean();
+    const docs = await liveGameRepo.findHistoryForUser(user.id, Math.min(50, limit));
     await attachPlayers(docs); // джойн игроков — app-level через шов
     return docs.map((d) => ({
         _id: String(d._id), status: d.status, winner: d.winner, endReason: d.endReason, isRated: d.isRated, timeControl: d.timeControl,

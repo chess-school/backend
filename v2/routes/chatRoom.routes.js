@@ -12,8 +12,8 @@ const withErrorHandling = require('../utils/withErrorHandling');
 const authMiddleware = require('../middleware/authV2.middleware');
 const validate = require('../middleware/validate');
 const chat = require('../controllers/chatRoom.controller');
-const ChatRoom = require('../models/ChatRoom');
-const ChatMessage = require('../models/ChatMessage');
+const ChatRoom = require('../repositories/chatRoom.repo'); // статики CONTEXT_KINDS (mongo|pg по MISC_DB)
+const ChatMessage = require('../repositories/chatMessage.repo'); // статика MAX_TEXT
 
 const roomIdParam = param('roomId').isMongoId().withMessage('roomId must be a valid id');
 

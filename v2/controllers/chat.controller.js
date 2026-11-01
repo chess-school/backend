@@ -1,7 +1,8 @@
 // v2/controllers/chat.controller.js
 
-const Conversation = require('../models/Conversation');
-const Message = require('../models/Message');
+const conversationRepo = require('../repositories/conversation.repo'); // шов misc (mongo|pg по MISC_DB)
+const messageRepo = require('../repositories/message.repo'); // шов misc
+const groupRepo = require('../repositories/group.repo'); // шов tenant (имя группы для groupContext)
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 
 /**
@@ -11,10 +12,13 @@ const userRepo = require('../repositories/user.repo'); // шов identity (mongo
  */
 const getMyConversations = async (req, res) => {
     // Находим все чаты, где текущий пользователь является участником
-    const conversations = await Conversation.find({ members: req.user.id })
-        .populate('groupContext', 'name') // Если это групповой чат, подгружаем название группы (Mongo-ссылка)
-        .sort({ 'lastMessage.timestamp': -1 }) // Сортируем по последнему сообщению
-        .lean();
+    const conversations = await conversationRepo.findForUser(req.user.id);
+
+    // groupContext (название группы) — app-level джойн через шов (замена populate('groupContext')).
+    const groupIds = [...new Set(conversations.filter((c) => c.groupContext).map((c) => String(c.groupContext)))];
+    const groups = groupIds.length ? await groupRepo.findByIds(groupIds) : [];
+    const groupNameById = new Map(groups.map((g) => [String(g._id), g.name]));
+    for (const c of conversations) if (c.groupContext) c.groupContext = { name: groupNameById.get(String(c.groupContext)) || null };
 
     // Участники — app-level джойн через шов (замена populate('members'), КРОМЕ себя — как match $ne).
     const selfId = String(req.user.id);
@@ -56,19 +60,15 @@ const getConversationMessages = async (req, res) => {
     const { page = 1, limit = 30 } = req.query;
     
     // 1. Проверяем, является ли пользователь участником этого чата
-    const conversation = await Conversation.findOne({ _id: conversationId, members: req.user.id });
+    const conversation = await conversationRepo.findMember(conversationId, req.user.id);
     if (!conversation) {
         return res.status(403).json({ msg: "Access denied or conversation not found." });
     }
 
     // 2. Загружаем сообщения с пагинацией (в обратном порядке, от новых к старым)
     const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
-    
-    const messages = await Message.find({ conversation: conversationId })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit, 10))
-        .lean();
+
+    const messages = await messageRepo.findPage(conversationId, skip, parseInt(limit, 10));
 
     // sender — app-level джойн через шов (замена populate('sender'))
     const senderMap = await userRepo.userCardMap(messages.map((m) => m.sender), ['uuid', 'firstName', 'lastName', 'avatarUrl']);
@@ -77,7 +77,7 @@ const getConversationMessages = async (req, res) => {
     // Переворачиваем массив, чтобы на фронтенде он был в правильном порядке
     messages.reverse();
 
-    const totalMessages = await Message.countDocuments({ conversation: conversationId });
+    const totalMessages = await messageRepo.countByConversation(conversationId);
     
     res.json({
         data: messages,

@@ -3,7 +3,7 @@
 // const { Chess } = require('chess.js'); // <--- ДОБАВЬТЕ ЭТУ СТРОКУ
 
 // Импортируем обе модели
-const Game = require('../models/Game');
+const gameRepo = require('../repositories/game.repo'); // шов play (mongo|pg по PLAY_DB)
 const positionRepo = require('../repositories/position.repo'); // шов content (mongo|pg по CONTENT_DB)
 
 /**
@@ -52,14 +52,7 @@ const getPlayerGames = async (req, res) => {
         const safeName = String(playerName).slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const playerRegex = new RegExp(safeName, 'i');
         
-        const games = await Game.find({
-            $or: [
-                { "white": playerRegex },
-                { "black": playerRegex }
-            ]
-        })
-        .limit(100)
-        .sort({ _id: -1 });
+        const games = await gameRepo.findByPlayer(playerRegex, 100);
 
         res.status(200).json({ success: true, data: games });
     } catch (err) {
@@ -97,9 +90,7 @@ const getGamesByPgnHistory = async (req, res) => {
 
         console.log(`ИЩЕМ ПАРТИИ С PGN: "${cleanPgn}"`);
         
-        const games = await Game.find({ an: { $regex: searchRegex } })
-                               .limit(100)
-                               .select('white black result an');
+        const games = await gameRepo.findByMoves(searchRegex, 100);
 
         console.log(`НАЙДЕНО: ${games.length}`);
 

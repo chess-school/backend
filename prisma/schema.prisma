@@ -655,3 +655,286 @@ model ScheduleV2 {
   @@index([contextRefId, date])
   @@map("schedulev2")
 }
+
+// --- Волна «realtime+misc» (ЗАВЕРШЕНИЕ миграции). Флаги: PLAY_DB (Game/LiveGame/ClassroomSession —
+//     горячие, сокеты/Redis) и MISC_DB (чат/медиа/sitepage/savedgame — сейчас пусты). PK=ObjectId-строка
+//     (Game id=ObjectId). Кросс-ссылки app-join через швы; вложенное (timeControl/clock/ratings/
+//     attendance/annotations/variants/blocks/context/lastMessage) — колонки/Json.
+
+enum LiveGameStatus {
+  created
+  active
+  finished
+  aborted
+}
+
+enum LiveGameSource {
+  challenge
+  lobby
+  pairing
+  rematch
+}
+
+enum CreatorColor {
+  white
+  black
+  random
+}
+
+enum TimeControlKind {
+  bullet
+  blitz
+  rapid
+  classical
+}
+
+enum ClassroomStatus {
+  live
+  ended
+}
+
+enum SavedGameContext {
+  personal_training
+  group_study
+}
+
+enum ChatContextKind {
+  direct
+  puzzle
+  homework
+  book
+}
+
+enum ConversationType {
+  private
+  group
+}
+
+enum MediaKind {
+  image
+}
+
+enum MediaStorage {
+  mongo
+  s3
+}
+
+enum SitePageStatus {
+  draft
+  published
+}
+
+// Архив партий (справочный, ~16900). white/black — строки (имена), не рефы.
+model Game {
+  id     String  @id
+  white  String?
+  black  String?
+  result String?
+  eco    String?
+  an     String?
+
+  @@index([white])
+  @@index([black])
+  @@map("games")
+}
+
+model LiveGame {
+  id            String        @id
+  whitePlayerId String?
+  blackPlayerId String?
+  createdById   String
+  creatorColor  CreatorColor  @default(random)
+  source        LiveGameSource @default(challenge)
+  isPrivate     Boolean       @default(true)
+  isRated       Boolean       @default(true)
+
+  timeControlKind            TimeControlKind
+  timeControlInitialSeconds  Int
+  timeControlIncrementSeconds Int
+  timeControlCustom          Boolean @default(false)
+
+  fen      String
+  moves    String[] @default([])
+  sanMoves String[] @default([])
+  pgn      String   @default("")
+
+  status    LiveGameStatus @default(created)
+  winner    String? // white|black|draw|null
+  endReason String?
+
+  clockWhiteMs    Int?
+  clockBlackMs    Int?
+  clockTurnStartedAt DateTime?
+
+  drawOfferBy String? // white|black|null
+
+  ratingChangesWhite Int?
+  ratingChangesBlack Int?
+  ratingsWhite Json? // { before, after, diff, provisional }
+  ratingsBlack Json?
+  ratingRange  Int?
+  rematchOfId  String?
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([whitePlayerId, createdAt])
+  @@index([blackPlayerId, createdAt])
+  @@index([status, isPrivate, createdAt])
+  @@map("livegames")
+}
+
+model ClassroomSession {
+  id         String          @id
+  clubId     String?
+  groupId    String?
+  studentId  String?
+  coachId    String
+  scheduleId String?
+  status     ClassroomStatus @default(live)
+  startedAt  DateTime        @default(now())
+  endedAt    DateTime?
+  attendance Json? // [{ user, role, joinedAt, lastSeenAt, leftAt }]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([groupId, startedAt])
+  @@map("classroomsessions")
+}
+
+model SavedGame {
+  id             String           @id
+  clubId         String?
+  pgn            String
+  title          String           @default("Анализ партии")
+  description    String?
+  annotations    Json? // [{ moveIdentifier, comment, arrows, squares, author }]
+  contextType    SavedGameContext
+  contextRefId   String
+  lastUpdatedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("savedgames")
+}
+
+model ChatRoom {
+  id            String          @id
+  memberIds     String[]        @default([]) // ровно 2 разных
+  key           String          @unique
+  contextKind   ChatContextKind @default(direct)
+  contextRefId  String?
+  contextTitle  String?
+  lastMessageText      String?
+  lastMessageSenderId  String?
+  lastMessageCreatedAt DateTime?
+  lastMessageAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lastMessageAt])
+  @@map("chat_rooms")
+}
+
+model ChatMessage {
+  id       String    @id
+  roomId   String
+  senderId String
+  text     String
+  readAt   DateTime?
+  clientId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([roomId, createdAt])
+  @@index([roomId, readAt, senderId])
+  @@map("chat_messages")
+}
+
+model ConversationV2 {
+  id             String           @id
+  type           ConversationType
+  memberIds      String[]         @default([])
+  groupContextId String?
+  lastMessageText      String?
+  lastMessageSenderId  String?
+  lastMessageTimestamp DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("conversations")
+}
+
+model MessageV2 {
+  id             String @id
+  conversationId String
+  senderId       String
+  text           String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([conversationId])
+  @@map("messages")
+}
+
+model MediaAsset {
+  id           String       @id
+  clubId       String
+  kind         MediaKind    @default(image)
+  mimeType     String?
+  originalName String?
+  originalMime String?
+  alt          String       @default("")
+  width        Int          @default(0)
+  height       Int          @default(0)
+  size         Int          @default(0)
+  storage      MediaStorage @default(mongo)
+  variants     Json? // { thumb, medium, large }
+  url          String?
+  uploadedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clubId, createdAt])
+  @@map("mediaassets")
+}
+
+model MediaBlob {
+  id          String @id
+  key         String @unique
+  clubId      String
+  contentType String?
+  data        Bytes
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("mediablobs")
+}
+
+model SitePage {
+  id          String         @id
+  clubId      String
+  slug        String
+  title       String         @default("")
+  blocks      Json? // [{ id, type, props }]
+  status      SitePageStatus @default(draft)
+  version     Int            @default(1)
+  updatedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clubId, slug])
+  @@map("sitepages")
+}

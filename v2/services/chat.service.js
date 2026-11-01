@@ -12,8 +12,8 @@ const mongoose = require('mongoose');
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
-const ChatRoom = require('../models/ChatRoom');
-const ChatMessage = require('../models/ChatMessage');
+const chatRoomRepo = require('../repositories/chatRoom.repo'); // шов misc (mongo|pg по MISC_DB)
+const chatMessageRepo = require('../repositories/chatMessage.repo'); // шов misc
 const { badRequest, forbidden, notFound, unprocessable } = require('../utils/apiError');
 const { emitToUsers } = require('./chatRealtime');
 
@@ -70,7 +70,7 @@ const canChat = async (user, otherId) => {
 /** Комната, где user — участник; иначе 404 */
 const findMyRoom = async (user, roomId) => {
     if (!ObjectId.isValid(roomId)) throw badRequest('Invalid room id.', 'INVALID_ID');
-    const room = await ChatRoom.findOne({ _id: roomId, members: user.id }).lean();
+    const room = await chatRoomRepo.findMyRoom(roomId, user.id);
     if (!room) throw notFound('Chat room not found.', 'ROOM_NOT_FOUND');
     return room;
 };
@@ -107,12 +107,7 @@ const toRoomDto = (room, me, unreadCount = 0) => {
 
 /** Непрочитанные (сообщения собеседника без readAt) по комнатам — одним запросом */
 const unreadByRoom = async (userId, roomIds) => {
-    if (!roomIds.length) return new Map();
-    const rows = await ChatMessage.aggregate([
-        { $match: { room: { $in: roomIds.map((id) => new ObjectId(String(id))) }, readAt: null, sender: { $ne: new ObjectId(String(userId)) } } },
-        { $group: { _id: '$room', count: { $sum: 1 } } },
-    ]);
-    return new Map(rows.map((r) => [String(r._id), r.count]));
+    return chatMessageRepo.unreadByRoom(userId, roomIds);
 };
 
 // =================================================================
@@ -120,9 +115,7 @@ const unreadByRoom = async (userId, roomIds) => {
 // =================================================================
 
 const listRooms = async (user) => {
-    const rooms = await ChatRoom.find({ members: user.id })
-        .sort({ lastMessageAt: -1, updatedAt: -1 })
-        .lean();
+    const rooms = await chatRoomRepo.listForUser(user.id);
     await attachMembers(rooms); // джойн участников — app-level через шов
     const unread = await unreadByRoom(user.id, rooms.map((r) => r._id));
     return rooms.map((r) => toRoomDto(r, user.id, unread.get(String(r._id)) || 0));
@@ -130,8 +123,8 @@ const listRooms = async (user) => {
 
 const normalizeContext = (context) => {
     if (!context || !context.kind || context.kind === 'direct') return { kind: 'direct' };
-    if (!ChatRoom.CONTEXT_KINDS.includes(context.kind)) {
-        throw unprocessable('Unknown chat context.', 'VALIDATION_ERROR', [{ field: 'context.kind', message: `One of: ${ChatRoom.CONTEXT_KINDS.join(', ')}` }]);
+    if (!chatRoomRepo.CONTEXT_KINDS.includes(context.kind)) {
+        throw unprocessable('Unknown chat context.', 'VALIDATION_ERROR', [{ field: 'context.kind', message: `One of: ${chatRoomRepo.CONTEXT_KINDS.join(', ')}` }]);
     }
     if (!context.refId) {
         throw unprocessable('Context reference is required.', 'VALIDATION_ERROR', [{ field: 'context.refId', message: 'Required for non-direct context.' }]);
@@ -148,20 +141,20 @@ const openRoom = async (user, { userId: otherId, context }) => {
         throw forbidden('You can only message your coach or your students.', 'CHAT_NOT_ALLOWED');
     }
     const ctx = normalizeContext(context);
-    const key = ChatRoom.keyFor(user.id, otherId, ctx);
+    const key = chatRoomRepo.keyFor(user.id, otherId, ctx);
 
     let created = false;
-    let room = await ChatRoom.findOne({ key }).lean();
+    let room = await chatRoomRepo.findByKey(key);
     if (!room) {
         try {
-            room = (await ChatRoom.create({ members: [user.id, otherId], key, context: ctx })).toObject();
+            room = await chatRoomRepo.create({ members: [user.id, otherId], key, context: ctx });
             created = true;
         } catch (e) {
             if (e.code !== 11000) throw e;
-            room = await ChatRoom.findOne({ key }).lean(); // параллельный запрос успел первым
+            room = await chatRoomRepo.findByKey(key); // параллельный запрос успел первым
         }
     }
-    const populated = await ChatRoom.findById(room._id).lean();
+    const populated = await chatRoomRepo.findById(room._id);
     await attachMembers(populated); // джойн участников — app-level через шов
     const unread = await unreadByRoom(user.id, [room._id]);
     return { room: toRoomDto(populated, user.id, unread.get(String(room._id)) || 0), created };
@@ -178,17 +171,13 @@ const openRoom = async (user, { userId: otherId, context }) => {
 const listMessages = async (user, roomId, { before, limit } = {}) => {
     await findMyRoom(user, roomId);
     const size = Math.max(1, Math.min(PAGE_MAX, Number(limit) || PAGE_DEFAULT));
-    const filter = { room: roomId };
+    let pivot = null;
     if (before) {
         if (!ObjectId.isValid(before)) throw badRequest('Invalid cursor.', 'INVALID_CURSOR');
-        const pivot = await ChatMessage.findOne({ _id: before, room: roomId }).select('createdAt').lean();
+        pivot = await chatMessageRepo.findPivot(before, roomId);
         if (!pivot) throw badRequest('Invalid cursor.', 'INVALID_CURSOR');
-        filter.$or = [
-            { createdAt: { $lt: pivot.createdAt } },
-            { createdAt: pivot.createdAt, _id: { $lt: pivot._id } },
-        ];
     }
-    const rows = await ChatMessage.find(filter).sort({ createdAt: -1, _id: -1 }).limit(size + 1).lean();
+    const rows = await chatMessageRepo.findPage(roomId, pivot, size);
     const hasMore = rows.length > size;
     return { data: rows.slice(0, size).reverse().map(toMessageDto), hasMore };
 };
@@ -202,20 +191,17 @@ const sendMessage = async (user, roomId, { text, clientId }) => {
     }
     const clean = typeof text === 'string' ? text.trim() : '';
     if (!clean) throw unprocessable('Message text is required.', 'VALIDATION_ERROR', [{ field: 'text', message: 'Required.' }]);
-    if (clean.length > ChatMessage.MAX_TEXT) {
-        throw unprocessable(`Message is too long (max ${ChatMessage.MAX_TEXT}).`, 'VALIDATION_ERROR', [{ field: 'text', message: 'Too long.' }]);
+    if (clean.length > chatMessageRepo.MAX_TEXT) {
+        throw unprocessable(`Message is too long (max ${chatMessageRepo.MAX_TEXT}).`, 'VALIDATION_ERROR', [{ field: 'text', message: 'Too long.' }]);
     }
     // Повтор той же отправки (переподключение сокета) не создаёт дубль
     if (clientId) {
-        const existing = await ChatMessage.findOne({ room: roomId, sender: user.id, clientId: String(clientId) }).lean();
+        const existing = await chatMessageRepo.findByClientId(roomId, user.id, clientId);
         if (existing) return toMessageDto(existing);
     }
-    const message = await ChatMessage.create({ room: roomId, sender: user.id, text: clean, ...(clientId ? { clientId: String(clientId).slice(0, 64) } : {}) });
-    await ChatRoom.updateOne(
-        { _id: roomId },
-        { $set: { lastMessage: { text: clean.slice(0, 300), sender: user.id, createdAt: message.createdAt }, lastMessageAt: message.createdAt } },
-    );
-    const dto = toMessageDto(message.toObject());
+    const message = await chatMessageRepo.create({ room: roomId, sender: user.id, text: clean, clientId });
+    await chatRoomRepo.updateLastMessage(roomId, { text: clean.slice(0, 300), sender: user.id, createdAt: message.createdAt }, message.createdAt);
+    const dto = toMessageDto(message);
     emitToUsers(room.members, 'message:new', { roomId: String(roomId), message: dto });
     return dto;
 };
@@ -224,10 +210,7 @@ const sendMessage = async (user, roomId, { text, clientId }) => {
 const markRead = async (user, roomId) => {
     const room = await findMyRoom(user, roomId);
     const readAt = new Date();
-    const { modifiedCount } = await ChatMessage.updateMany(
-        { room: roomId, sender: { $ne: user.id }, readAt: null },
-        { $set: { readAt } },
-    );
+    const modifiedCount = await chatMessageRepo.markRead(roomId, user.id, readAt);
     if (modifiedCount > 0) {
         emitToUsers(room.members, 'message:read', { roomId: String(roomId), readerId: String(user.id), readAt });
     }
@@ -236,7 +219,7 @@ const markRead = async (user, roomId) => {
 
 /** Суммарно и по комнатам */
 const unreadSummary = async (user) => {
-    const roomIds = await ChatRoom.find({ members: user.id }).distinct('_id');
+    const roomIds = await chatRoomRepo.roomIdsForUser(user.id);
     const byRoom = await unreadByRoom(user.id, roomIds);
     let total = 0;
     const rooms = {};

@@ -10,7 +10,7 @@
 // медиа без обращения к нашему бэкенду. Нет живой сессии — событие просто игнорируется.
 
 const mongoose = require('mongoose');
-const ClassroomSession = require('../../models/ClassroomSession');
+const classroomRepo = require('../../repositories/classroomSession.repo'); // шов play (mongo|pg по PLAY_DB)
 
 const ROOM_PREFIX = 'classroom-';
 const LESSON_PREFIX = 'lesson-'; // индивидуальная комната: classroom-lesson-<eventId>
@@ -26,10 +26,10 @@ const liveSessionForRoom = async (roomName) => {
     if (ref.startsWith(LESSON_PREFIX)) {
         const eventId = ref.slice(LESSON_PREFIX.length);
         if (!mongoose.Types.ObjectId.isValid(eventId)) return null;
-        return ClassroomSession.findOne({ schedule: eventId, status: 'live' }).sort({ startedAt: -1 });
+        return classroomRepo.findLiveBySchedule(eventId);
     }
     if (!mongoose.Types.ObjectId.isValid(ref)) return null;
-    return ClassroomSession.findOne({ group: ref, status: 'live' }).sort({ startedAt: -1 });
+    return classroomRepo.findLiveByGroup(ref);
 };
 
 const parseRole = (metadata) => {
@@ -61,32 +61,17 @@ const handleLivekitEvent = async (event) => {
             if (!identity || !mongoose.Types.ObjectId.isValid(identity)) return { ignored: 'bad-identity' };
             const role = parseRole(event.participant.metadata);
             // Атомарно: обновить существующую запись либо добавить новую (параллельные вебхуки не затирают)
-            const touched = await ClassroomSession.updateOne(
-                { _id: session._id, 'attendance.user': identity },
-                { $set: { 'attendance.$.lastSeenAt': now, 'attendance.$.leftAt': null } }
-            );
-            if (touched.matchedCount === 0) {
-                await ClassroomSession.updateOne(
-                    { _id: session._id, 'attendance.user': { $ne: identity } },
-                    { $push: { attendance: { user: identity, role, joinedAt: now, lastSeenAt: now, leftAt: null } } }
-                );
-            }
+            await classroomRepo.joinAttendance(session._id, identity, role, now);
             return { ok: 'joined' };
         }
         case 'participant_left':
         case 'participant_connection_aborted': {
             if (!identity || !mongoose.Types.ObjectId.isValid(identity)) return { ignored: 'bad-identity' };
-            await ClassroomSession.updateOne(
-                { _id: session._id, 'attendance.user': identity },
-                { $set: { 'attendance.$.leftAt': now } }
-            );
+            await classroomRepo.markLeft(session._id, identity, now);
             return { ok: 'left' };
         }
         case 'room_finished': {
-            session.status = 'ended';
-            session.endedAt = now;
-            session.attendance.forEach((a) => { if (!a.leftAt) a.leftAt = now; });
-            await session.save();
+            await classroomRepo.end(session._id, now);
             return { ok: 'finished' };
         }
         default:

@@ -19,7 +19,7 @@
 // Зависимости (время, таймеры, рассылка, redis) внедряются — часы и таймауты проверяются в тестах.
 
 const { Chess } = require('chess.js');
-const LiveGame = require('../../models/LiveGame');
+const liveGameRepo = require('../../repositories/liveGame.repo'); // шов play (mongo|pg по PLAY_DB)
 const userRepo = require('../../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const { GameClock } = require('./clock');
 const redisModule = require('./redis');
@@ -201,7 +201,7 @@ const createGameManager = ({
 
         if (!isClustered) {
             if (games.has(key)) return games.get(key);
-            const doc = await LiveGame.findById(key).lean();
+            const doc = await liveGameRepo.findById(key);
             if (!doc || doc.status !== 'active') return null;
             const state = fromDocument(doc);
             games.set(key, state);
@@ -215,7 +215,7 @@ const createGameManager = ({
         const snap = await redis.loadState(key);
         if (snap) state = buildState(snap);
         else {
-            const doc = await LiveGame.findById(key).lean();
+            const doc = await liveGameRepo.findById(key);
             if (!doc || doc.status !== 'active') return null;
             state = fromDocument(doc);
             await redis.saveState(key, serialize(state));
@@ -280,7 +280,7 @@ const createGameManager = ({
             ...(rating ? { ratingChanges: rating.ratingChanges, ratings: rating.ratings } : {}),
         };
         // Итог — полный и авторитетный — всегда пишется в Mongo; Redis-ключ партии убираем
-        await LiveGame.updateOne({ _id: state.id, status: 'active' }, { $set: update });
+        await liveGameRepo.updateActive(state.id, update);
         if (isClustered) { clearWriteBehind(String(state.id)); await redis.deleteState(state.id).catch(logError); writeQueue.delete(String(state.id)); }
 
         const payload = {
@@ -319,7 +319,7 @@ const createGameManager = ({
         // Фильтр status:'active' защищает от гонки с finish: если партия уже завершилась,
         // отложенный сброс просто не найдёт документа (matchedCount 0) и ничего не перезапишет.
         const next = prev
-            .then(() => LiveGame.updateOne({ _id: id, status: 'active' }, { $set: snap }))
+            .then(() => liveGameRepo.updateActive(id, snap))
             .catch((e) => console.error('Write-behind to Mongo failed:', e.message));
         writeQueue.set(id, next);
         next.then(() => { if (writeQueue.get(id) === next) writeQueue.delete(id); });
@@ -355,13 +355,8 @@ const createGameManager = ({
             writeBehind(state);
             return;
         }
-        const res = await LiveGame.updateOne(
-            { _id: state.id, status: 'active', moves: { $size: plyBefore } },
-            {
-                $push: { moves: uci, sanMoves: san },
-                $set: { fen: state.chess.fen(), clock: state.clock.toDocument(), drawOfferBy: state.drawOfferBy },
-            },
-        );
+        const res = await liveGameRepo.pushMove(state.id, plyBefore, uci, san,
+            { fen: state.chess.fen(), clock: state.clock.toDocument(), drawOfferBy: state.drawOfferBy });
         if (res.matchedCount === 0) throw conflict('The game state changed. Reload the game.', 'GAME_STATE_CONFLICT');
     };
 
@@ -370,7 +365,7 @@ const createGameManager = ({
     const requirePlayer = async (gameId, userId) => {
         const state = await load(gameId);
         if (!state) {
-            const exists = await LiveGame.exists({ _id: gameId });
+            const exists = await liveGameRepo.exists(gameId);
             if (!exists) throw notFound('Game not found.', 'GAME_NOT_FOUND');
             throw conflict('The game is not in progress.', 'GAME_NOT_ACTIVE');
         }
@@ -444,7 +439,7 @@ const createGameManager = ({
 
     const persistSideEffect = async (state, set) => {
         if (isClustered) { await redis.saveState(state.id, serialize(state)); return; }
-        await LiveGame.updateOne({ _id: state.id, status: 'active' }, { $set: set });
+        await liveGameRepo.updateActive(state.id, set);
     };
 
     const offerDraw = (gameId, userId) => withLock(gameId, async () => {
@@ -473,7 +468,7 @@ const createGameManager = ({
 
     /** Полное состояние партии (любой статус) — для входа в партию и зрителей */
     const snapshot = async (gameId) => {
-        const doc = await LiveGame.findById(gameId).lean();
+        const doc = await liveGameRepo.findById(gameId);
         if (!doc) throw notFound('Game not found.', 'GAME_NOT_FOUND');
         // Игроки/создатель — app-level джойн через шов (замена populate, один батч-запрос).
         {
@@ -494,7 +489,7 @@ const createGameManager = ({
             clock = { whiteMs: ms, blackMs: doc.clock?.blackMs ?? ms, turn: (doc.moves?.length ?? 0) % 2 ? 'black' : 'white', running: false, serverNow: t };
         }
         // Партия могла закончиться при загрузке (упавший флаг) — перечитать итог
-        const fresh = doc.status === 'active' && !state ? await LiveGame.findById(gameId).lean() : doc;
+        const fresh = doc.status === 'active' && !state ? await liveGameRepo.findById(gameId) : doc;
         const players = (d) => ({ white: playerDto(doc.whitePlayer, speed), black: playerDto(doc.blackPlayer, speed), ...d });
         return players({
             _id: String(doc._id),

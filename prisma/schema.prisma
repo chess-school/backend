@@ -357,3 +357,141 @@ model Position {
 
   @@map("positions")
 }
+
+// --- Домен 6: Learning (Assignment, Submission, PuzzleAttempt, ScheduleV2) ---
+// Домашки/сдачи/попытки/расписание. Кросс-ссылки (clubId/authorId=Coach/studentId=User/
+// scheduleId/puzzleBookId/coachId/contractId/contextRefId) БЕЗ Prisma-связей — джойнятся
+// приложением через швы. Вложенное (plan, context, review) — колонки/Json. PK=ObjectId-строка.
+// Коллекции в Mongo: assignments, submissions, puzzleattempts, schedulev2 (v2; legacy `schedules` НЕ трогаем).
+
+enum AssignmentContextType {
+  student
+  group
+  course
+}
+
+enum AssignmentKind {
+  generic
+  puzzles
+}
+
+enum SubmissionStatus {
+  submitted
+  needs_revision
+  approved
+}
+
+enum ScheduleContextType {
+  individual
+  group
+  course_wide
+}
+
+enum ScheduleStatus {
+  scheduled
+  completed
+  cancelled
+  missed
+}
+
+model Assignment {
+  id          String  @id // Mongo ObjectId (hex)
+  clubId      String? // → clubs.id
+  title       String
+  description String?
+  authorId    String // → coaches.id
+
+  contextType  AssignmentContextType
+  contextRefId String // userId | groupId | courseId (по contextType)
+
+  lessonId   String? // урок в курсе (Course.modules.lessons._id)
+  scheduleId String? @unique // → schedulev2.id (не больше одного ДЗ на занятие, sparse)
+
+  dueDate DateTime?
+
+  kind         AssignmentKind @default(generic)
+  puzzleBookId String? // → puzzlebooks.id (для kind=puzzles)
+  puzzleTarget Int            @default(0)
+  plan         Json? // [{ date, puzzleCount, note }]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([authorId, createdAt])
+  @@index([contextType, contextRefId])
+  @@map("assignments")
+}
+
+model Submission {
+  id           String  @id // Mongo ObjectId (hex)
+  clubId       String? // → clubs.id
+  assignmentId String // → assignments.id
+  studentId    String // → users.id
+
+  contentText    String?
+  contentFileUrl String?
+
+  // Вложение (скриншот). data тянется только по отдельному запросу (как select:false в Mongo).
+  attachmentData        Bytes?
+  attachmentContentType String?
+  attachmentSize        Int?
+  attachmentFilename    String?
+
+  submittedAt DateTime @default(now())
+
+  status SubmissionStatus @default(submitted)
+
+  reviewComment    String?
+  reviewReviewedBy String? // → coaches.id
+  reviewReviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assignmentId, studentId]) // одна сдача ДЗ на студента
+  @@index([studentId, status])
+  @@map("submissions")
+}
+
+model PuzzleAttempt {
+  id               String  @id // Mongo ObjectId (hex)
+  studentId        String // → users.id
+  puzzleBookId     String // → puzzlebooks.id
+  exerciseId       String // _id упражнения внутри книги
+  solved           Boolean @default(true)
+  timeTakenSeconds Int     @default(0)
+  attemptsCount    Int     @default(0)
+  usedHint         Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([puzzleBookId, studentId])
+  @@index([studentId])
+  @@map("puzzleattempts")
+}
+
+// Расписание занятий (v2 модель 'ScheduleV2', коллекция schedulev2).
+model ScheduleV2 {
+  id              String         @id // Mongo ObjectId (hex)
+  clubId          String? // → clubs.id
+  title           String
+  description     String         @default("")
+  date            DateTime
+  durationMinutes Int?
+  link            String         @default("")
+  status          ScheduleStatus @default(scheduled)
+  coachId         String // → coaches.id
+
+  contextType  ScheduleContextType
+  contextRefId String // userId | groupId | courseId (по contextType)
+
+  contractId String? // → trainingcontracts.id
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([coachId, date])
+  @@index([contextRefId, date])
+  @@map("schedulev2")
+}

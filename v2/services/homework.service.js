@@ -9,10 +9,9 @@
 //   тренер видит и меняет только свои ДЗ и сдачи по ним; ADMIN — любые;
 //   студент видит ДЗ, адресованные ему, и только свои сдачи.
 
-const mongoose = require('mongoose');
-const Assignment = require('../models/Assignment');
-const Submission = require('../models/Submission');
-const Schedule = require('../models/Schedule');
+const assignmentRepo = require('../repositories/assignment.repo'); // шов learning (mongo|pg по LEARNING_DB)
+const submissionRepo = require('../repositories/submission.repo'); // шов learning
+const scheduleRepo = require('../repositories/schedule.repo'); // шов learning
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const Group = require('../models/Group');
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
@@ -20,8 +19,6 @@ const contractRepo = require('../repositories/trainingContract.repo'); // шов
 const { notify: emitNotification } = require('./notify');
 const puzzleBookRepo = require('../repositories/puzzleBook.repo'); // шов content (mongo|pg по CONTENT_DB)
 const { forbidden, notFound, conflict, unprocessable } = require('../utils/apiError');
-
-const SUBMISSION_FIELDS = 'assignment student contentText attachment.contentType attachment.size attachment.filename status review submittedAt createdAt updatedAt';
 
 // =================================================================
 //                            ОБЩЕЕ
@@ -46,19 +43,14 @@ const requireCoachId = async (user) => {
 const notify = ({ recipient, type, message, description, metadata }) =>
     emitNotification({ recipient, type, message, description, link: metadata?.link, entity: metadata?.entity });
 
-/** Условие «ДЗ адресовано этому студенту»: лично, через его группы или через активные записи на курсы */
+/** Аудитория студента (семантика): ему лично, через его группы или активные записи на курсы.
+ *  Фильтр по этой аудитории строит шов assignment.repo (одинаково для mongo|pg). */
 const studentAudience = async (studentId) => {
     const [groupIds, courseIds] = await Promise.all([
         Group.find({ members: studentId }).distinct('_id'),
         contractRepo.distinct('course', { student: studentId, status: 'active' }),
     ]);
-    return {
-        $or: [
-            { 'context.type': 'student', 'context.refId': new mongoose.Types.ObjectId(String(studentId)) },
-            { 'context.type': 'group', 'context.refId': { $in: groupIds } },
-            { 'context.type': 'course', 'context.refId': { $in: courseIds } },
-        ],
-    };
+    return { studentId, groupIds, courseIds };
 };
 
 const toSubmissionDto = (s) => s && ({
@@ -84,7 +76,7 @@ const toSubmissionDto = (s) => s && ({
  */
 const createAssignment = async (user, payload, club) => {
     const coachId = await requireCoachId(user);
-    const lesson = await Schedule.findById(payload.scheduleId).select('coach context title').lean();
+    const lesson = await scheduleRepo.findById(payload.scheduleId);
     if (!lesson) throw notFound('Lesson not found.', 'LESSON_NOT_FOUND');
     if (String(lesson.coach) !== String(coachId)) throw forbidden('You can add homework only to your own lessons.', 'NOT_YOUR_LESSON');
 
@@ -93,7 +85,7 @@ const createAssignment = async (user, payload, club) => {
 
     let assignment;
     try {
-        assignment = await Assignment.create({
+        assignment = await assignmentRepo.create({
             title: payload.title || lesson.title,
             description: payload.description,
             author: coachId,
@@ -117,7 +109,7 @@ const createAssignment = async (user, payload, club) => {
         message: `New homework: ${assignment.title}`,
         metadata: { link: '/students-shedule', entity: { type: 'Assignment', id: assignment._id } },
     })));
-    return assignment.toObject();
+    return assignment;
 };
 
 /**
@@ -140,7 +132,7 @@ const createPuzzleAssignment = async (user, payload, club) => {
         }))
         : [];
 
-    const assignment = await Assignment.create({
+    const assignment = await assignmentRepo.create({
         title: payload.title || `Solve puzzles: ${book.title}`,
         description: payload.description,
         author: coachId,
@@ -163,20 +155,18 @@ const createPuzzleAssignment = async (user, payload, club) => {
         message: `New homework: ${assignment.title}`,
         metadata: { link: `/books/${book._id}/solve`, entity: { type: 'Assignment', id: assignment._id } },
     })));
-    return assignment.toObject();
+    return assignment;
 };
 
 /** ДЗ тренера; filters: { scheduleId } */
 const listCoachAssignments = async (user, filters, club) => {
     const coachId = await requireCoachId(user);
     // Изоляция по клубу (#7): если активный клуб определён — только его ДЗ
-    const query = { author: coachId, ...(club ? { club } : {}) };
-    if (filters.scheduleId) query.schedule = filters.scheduleId;
-    return Assignment.find(query).sort({ createdAt: -1 }).limit(200).lean();
+    return assignmentRepo.findByAuthor({ author: coachId, club: club || null, schedule: filters.scheduleId || null });
 };
 
 const loadOwnAssignment = async (user, assignmentId) => {
-    const assignment = await Assignment.findById(assignmentId);
+    const assignment = await assignmentRepo.findById(assignmentId);
     if (!assignment) throw notFound('Homework not found.', 'HOMEWORK_NOT_FOUND');
     if (!user.roles.includes('ADMIN')) {
         const coachId = await requireCoachId(user);
@@ -187,21 +177,22 @@ const loadOwnAssignment = async (user, assignmentId) => {
 
 /** payload: { title?, description?, dueDate? (null — снять срок) } */
 const updateAssignment = async (user, assignmentId, payload) => {
-    const assignment = await loadOwnAssignment(user, assignmentId);
-    if (payload.title !== undefined) assignment.title = payload.title;
-    if (payload.description !== undefined) assignment.description = payload.description;
-    if (payload.dueDate !== undefined) assignment.dueDate = payload.dueDate || undefined;
-    await assignment.save();
-    return assignment.toObject();
+    await loadOwnAssignment(user, assignmentId); // проверка прав
+    const fields = {};
+    if (payload.title !== undefined) fields.title = payload.title;
+    if (payload.description !== undefined) fields.description = payload.description;
+    if (payload.dueDate !== undefined) fields.dueDate = payload.dueDate || null;
+    const assignment = Object.keys(fields).length ? await assignmentRepo.updateById(assignmentId, fields) : await assignmentRepo.findById(assignmentId);
+    return assignment;
 };
 
 /** Удалить можно только ДЗ, по которому ещё никто не сдавал работу */
 const deleteAssignment = async (user, assignmentId) => {
     const assignment = await loadOwnAssignment(user, assignmentId);
-    if (await Submission.exists({ assignment: assignment._id })) {
+    if (await submissionRepo.existsForAssignment(assignment._id)) {
         throw conflict('Students have already submitted this homework; it cannot be deleted.', 'HAS_SUBMISSIONS');
     }
-    await assignment.deleteOne();
+    await assignmentRepo.deleteById(assignment._id);
 };
 
 // =================================================================
@@ -212,24 +203,32 @@ const deleteAssignment = async (user, assignmentId) => {
 const listSubmissionsForReview = async (user, filters, club) => {
     const coachId = await requireCoachId(user);
     // Изоляция по клубу (#7): если активный клуб определён — только ДЗ этого клуба
-    const assignmentIds = await Assignment.find({ author: coachId, ...(club ? { club } : {}) }).distinct('_id');
-    const submissions = await Submission.find({ assignment: { $in: assignmentIds }, status: filters.status || 'submitted' })
-        .select(SUBMISSION_FIELDS)
-        .populate({ path: 'assignment', select: 'title description dueDate schedule', populate: { path: 'schedule', select: 'title date' } })
-        .sort({ submittedAt: -1 })
-        .limit(200)
-        .lean();
+    const assignmentIds = await assignmentRepo.distinctIdsByAuthor({ author: coachId, club: club || null });
+    const submissions = await submissionRepo.findForReview(assignmentIds, filters.status || 'submitted', { limit: 200 });
     // student — app-level джойн через шов (замена populate('student'))
     const studentMap = await userRepo.userCardMap(submissions.map((s) => s.student), ['uuid', 'firstName', 'lastName', 'email']);
     for (const s of submissions) s.student = s.student ? (studentMap.get(String(s.student)) || null) : null;
-    return submissions.map((s) => ({ ...toSubmissionDto(s), student: s.student, assignment: s.assignment }));
+    // assignment(+schedule) — app-level джойн через швы (замена вложенного populate)
+    const aIds = [...new Set(submissions.map((s) => String(s.assignment)).filter(Boolean))];
+    const assignments = await Promise.all(aIds.map((id) => assignmentRepo.findById(id)));
+    const aById = new Map(assignments.filter(Boolean).map((a) => [String(a._id), a]));
+    const schedIds = [...new Set(assignments.filter((a) => a && a.schedule).map((a) => String(a.schedule)))];
+    const scheds = await Promise.all(schedIds.map((id) => scheduleRepo.findById(id)));
+    const schedById = new Map(scheds.filter(Boolean).map((e) => [String(e._id), e]));
+    const assignmentView = (a) => a && ({
+        _id: a._id, title: a.title, description: a.description, dueDate: a.dueDate,
+        schedule: a.schedule && schedById.get(String(a.schedule))
+            ? { _id: a.schedule, title: schedById.get(String(a.schedule)).title, date: schedById.get(String(a.schedule)).date }
+            : (a.schedule || undefined),
+    });
+    return submissions.map((s) => ({ ...toSubmissionDto(s), student: s.student, assignment: assignmentView(aById.get(String(s.assignment))) }));
 };
 
 /** payload: { status: 'approved' | 'needs_revision', comment? } */
 const reviewSubmission = async (user, submissionId, payload) => {
-    const submission = await Submission.findById(submissionId).select(SUBMISSION_FIELDS);
-    if (!submission) throw notFound('Submission not found.', 'SUBMISSION_NOT_FOUND');
-    const assignment = await loadOwnAssignment(user, submission.assignment).catch(() => {
+    const existing = await submissionRepo.findById(submissionId);
+    if (!existing) throw notFound('Submission not found.', 'SUBMISSION_NOT_FOUND');
+    const assignment = await loadOwnAssignment(user, existing.assignment).catch(() => {
         throw notFound('Submission not found.', 'SUBMISSION_NOT_FOUND');
     });
     if (payload.status === 'needs_revision' && !payload.comment) {
@@ -237,9 +236,10 @@ const reviewSubmission = async (user, submissionId, payload) => {
             [{ field: 'comment', message: 'comment is required for needs_revision' }]);
     }
 
-    submission.status = payload.status;
-    submission.review = { comment: payload.comment || '', reviewedBy: assignment.author, reviewedAt: new Date() };
-    await submission.save();
+    const submission = await submissionRepo.setReview(submissionId, {
+        status: payload.status,
+        review: { comment: payload.comment || '', reviewedBy: assignment.author, reviewedAt: new Date() },
+    });
 
     await notify({
         recipient: submission.student,
@@ -260,24 +260,28 @@ const reviewSubmission = async (user, submissionId, payload) => {
 /** ДЗ, адресованные студенту, вместе с его сдачей и названием/датой занятия */
 const listMyAssignments = async (user) => {
     const audience = await studentAudience(user.id);
-    const assignments = await Assignment.find(audience)
-        .populate('schedule', 'title date')
-        .populate('puzzleBook', 'title')
-        .sort({ dueDate: 1, createdAt: -1 })
-        .limit(200)
-        .lean();
-    const submissions = await Submission.find({ student: user.id, assignment: { $in: assignments.map((a) => a._id) } })
-        .select(SUBMISSION_FIELDS)
-        .lean();
+    const assignments = await assignmentRepo.findForAudience(audience, { limit: 200 });
+    const submissions = await submissionRepo.findByStudentAndAssignments(user.id, assignments.map((a) => a._id));
+    // schedule(title,date) и puzzleBook(title) — app-level джойн через швы (замена populate)
+    const schedIds = [...new Set(assignments.filter((a) => a.schedule).map((a) => String(a.schedule)))];
+    const bookIds = [...new Set(assignments.filter((a) => a.puzzleBook).map((a) => String(a.puzzleBook)))];
+    const [scheds, books] = await Promise.all([
+        Promise.all(schedIds.map((id) => scheduleRepo.findById(id))),
+        Promise.all(bookIds.map((id) => puzzleBookRepo.findById(id, { select: 'title' }))),
+    ]);
+    const schedById = new Map(scheds.filter(Boolean).map((e) => [String(e._id), e]));
+    const bookById = new Map(books.filter(Boolean).map((b) => [String(b._id), b]));
     const byAssignment = new Map(submissions.map((s) => [String(s.assignment), s]));
     return assignments.map((a) => ({
         _id: a._id,
         title: a.title,
         description: a.description || '',
         dueDate: a.dueDate || null,
-        lesson: a.schedule ? { _id: a.schedule._id, title: a.schedule.title, date: a.schedule.date } : null,
+        lesson: a.schedule && schedById.get(String(a.schedule))
+            ? { _id: a.schedule, title: schedById.get(String(a.schedule)).title, date: schedById.get(String(a.schedule)).date } : null,
         kind: a.kind || 'generic',
-        puzzleBook: a.puzzleBook ? { _id: a.puzzleBook._id, title: a.puzzleBook.title } : null,
+        puzzleBook: a.puzzleBook && bookById.get(String(a.puzzleBook))
+            ? { _id: a.puzzleBook, title: bookById.get(String(a.puzzleBook)).title } : null,
         puzzleTarget: a.puzzleTarget || 0,
         plan: (a.plan || []).map((p) => ({ date: p.date, puzzleCount: p.puzzleCount || 0, note: p.note || '' })),
         createdAt: a.createdAt,
@@ -290,14 +294,14 @@ const listMyAssignments = async (user) => {
  * payload: { contentText? }, file: { buffer, mimetype, size, originalname }? (multer)
  */
 const submitAssignment = async (user, assignmentId, payload, file, club) => {
-    const assignment = await Assignment.findById(assignmentId).select('title author club').lean();
+    const assignment = await assignmentRepo.findById(assignmentId);
     // ДЗ, адресованное не этому студенту, для него не существует
-    if (!assignment || !(await Assignment.exists({ _id: assignmentId, ...(await studentAudience(user.id)) }))) {
+    if (!assignment || !(await assignmentRepo.existsForAudience(assignmentId, await studentAudience(user.id)))) {
         throw notFound('Homework not found.', 'HOMEWORK_NOT_FOUND');
     }
 
     const text = (payload.contentText || '').trim();
-    const existing = await Submission.findOne({ assignment: assignmentId, student: user.id }).select(SUBMISSION_FIELDS);
+    const existing = await submissionRepo.findOneByAssignmentStudent(assignmentId, user.id);
     if (!text && !file && !(existing && existing.attachment && existing.attachment.contentType)) {
         throw unprocessable('Add a text answer or a screenshot.', 'EMPTY_SUBMISSION',
             [{ field: 'contentText', message: 'Provide contentText or a file' }]);
@@ -315,10 +319,9 @@ const submitAssignment = async (user, assignmentId, payload, file, club) => {
     const submissionClub = assignment.club || club || null;
     let submission;
     try {
-        submission = await Submission.findOneAndUpdate(
-            { assignment: assignmentId, student: user.id, status: { $ne: 'approved' } },
-            { $set: update, $setOnInsert: { assignment: assignmentId, student: user.id, ...(submissionClub ? { club: submissionClub } : {}) } },
-            { new: true, upsert: true, runValidators: true, projection: SUBMISSION_FIELDS },
+        submission = await submissionRepo.upsertSubmission(
+            { assignmentId, studentId: user.id, club: submissionClub },
+            update,
         );
     } catch (e) {
         // Гонка с проверкой: работу приняли между чтением и записью
@@ -340,14 +343,14 @@ const submitAssignment = async (user, assignmentId, payload, file, club) => {
 
 /** Вложение сдачи: видит сам студент, автор ДЗ и ADMIN */
 const getSubmissionAttachment = async (user, submissionId) => {
-    const submission = await Submission.findById(submissionId).select('+attachment.data').lean();
+    const submission = await submissionRepo.getWithAttachment(submissionId);
     if (!submission || !submission.attachment || !submission.attachment.data) {
         throw notFound('Attachment not found.', 'ATTACHMENT_NOT_FOUND');
     }
     const isOwner = String(submission.student) === String(user.id);
     if (!isOwner && !user.roles.includes('ADMIN')) {
         const coachId = await getCoachId(user.id);
-        const isAuthor = coachId && await Assignment.exists({ _id: submission.assignment, author: coachId });
+        const isAuthor = coachId && await assignmentRepo.existsAuthored(submission.assignment, coachId);
         if (!isAuthor) throw notFound('Attachment not found.', 'ATTACHMENT_NOT_FOUND');
     }
     // lean() отдаёт Buffer как BSON Binary — без преобразования Express отправил бы не те байты

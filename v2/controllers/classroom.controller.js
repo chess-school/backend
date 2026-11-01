@@ -14,7 +14,7 @@
 const { AccessToken, TrackSource, WebhookReceiver } = require('livekit-server-sdk');
 const Group = require('../models/Group');
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
-const Schedule = require('../models/Schedule');
+const scheduleRepo = require('../repositories/schedule.repo'); // шов learning (mongo|pg по LEARNING_DB)
 const ClassroomSession = require('../models/ClassroomSession');
 const { authorize, roomIdForLesson } = require('../services/classroom/classroomManager');
 const { handleLivekitEvent } = require('../services/classroom/livekitWebhook');
@@ -80,7 +80,7 @@ const generateToken = async (req, res) => {
  */
 const enterFromSchedule = async (req, res) => {
     const { eventId } = req.params;
-    const event = await Schedule.findById(eventId).select('coach context');
+    const event = await scheduleRepo.findById(eventId);
     if (!event) throw notFound('Schedule event not found.', 'EVENT_NOT_FOUND');
     const type = event.context && event.context.type;
     // Живой класс: групповой (комната = группа) или индивидуальный 1-на-1 (комната = `lesson-<eventId>`)

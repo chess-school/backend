@@ -2,7 +2,7 @@
 
 const mongoose = require('mongoose');
 const puzzleBookRepo = require('../repositories/puzzleBook.repo'); // шов content (mongo|pg по CONTENT_DB)
-const PuzzleAttempt = require('../models/PuzzleAttempt');
+const puzzleAttemptRepo = require('../repositories/puzzleAttempt.repo'); // шов learning (mongo|pg по LEARNING_DB)
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const Group = require('../models/Group');
 const { getTask, getReadyChapterFiles, loadChapterExercises } = require('../services/digitizer.service');
@@ -318,7 +318,7 @@ const recordAttempt = async (req, res) => {
     const usedHint = req.body.usedHint === true;
     const mistakes = num(req.body.attemptsCount, 100000);
 
-    await PuzzleAttempt.create({
+    await puzzleAttemptRepo.create({
         student: req.user.id,
         puzzleBook: book._id,
         exerciseId: String(exerciseId),
@@ -366,31 +366,8 @@ const recordAttempt = async (req, res) => {
 const getBookStats = async (req, res) => {
     const book = await findVisibleBook(req, res, { 'exercises._id': 1 });
     if (!book) return;
-    const bookId = new mongoose.Types.ObjectId(String(book._id));
-    // Сначала сворачиваем попытки до «лучшего» по каждому упражнению ученика, затем агрегируем по ученику
-    const rows = await PuzzleAttempt.aggregate([
-        { $match: { puzzleBook: bookId } },
-        { $group: {
-            _id: { student: '$student', exercise: '$exerciseId' },
-            solved: { $max: { $cond: ['$solved', 1, 0] } },
-            attempts: { $sum: 1 },
-            mistakes: { $sum: '$attemptsCount' },
-            time: { $sum: '$timeTakenSeconds' },
-            hint: { $max: { $cond: ['$usedHint', 1, 0] } },
-            last: { $max: '$updatedAt' },
-        } },
-        { $group: {
-            _id: '$_id.student',
-            solvedCount: { $sum: '$solved' },
-            exercisesAttempted: { $sum: 1 },
-            attempts: { $sum: '$attempts' },
-            totalMistakes: { $sum: '$mistakes' },
-            totalTimeSeconds: { $sum: '$time' },
-            hintsUsed: { $sum: '$hint' },
-            lastActivity: { $max: '$last' },
-        } },
-        { $sort: { lastActivity: -1 } },
-    ]);
+    // Сначала сворачиваем попытки до «лучшего» по каждому упражнению ученика, затем агрегируем по ученику — в шве
+    const rows = await puzzleAttemptRepo.statsByBook(book._id);
     const users = await userRepo.findByIdList(rows.map((r) => r._id));
     const byId = new Map(users.map((u) => [String(u._id), u]));
     const students = rows.map((r) => ({

@@ -3,7 +3,7 @@ const clubService = require('../services/club.service');
 const Club = require('../models/Club');
 const ClubMembership = require('../models/ClubMembership');
 const Group = require('../models/Group');
-const Schedule = require('../models/Schedule');
+const scheduleRepo = require('../repositories/schedule.repo'); // шов learning (mongo|pg по LEARNING_DB)
 const paymentRepo = require('../repositories/payment.repo');
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const { notFound } = require('../utils/apiError');
@@ -48,9 +48,8 @@ const getOverview = async (req, res) => {
         ClubMembership.countDocuments({ club: clubId, role: 'student', status: 'active' }),
         ClubMembership.countDocuments({ club: clubId, role: 'trainer', status: 'active' }),
         Group.find({ club: clubId }).lean(),
-        Schedule.find({ club: clubId, date: { $gte: dayStart, $lt: dayEnd } })
-            .sort({ date: 1 }).lean(),
-        Schedule.find({ club: clubId, 'context.type': 'group', date: { $gte: now } }).sort({ date: 1 }).lean(),
+        scheduleRepo.findClubEventsInRange(clubId, dayStart, dayEnd),
+        scheduleRepo.findClubUpcomingGroup(clubId, now),
         paymentRepo.findByClub(clubId),
     ]);
 

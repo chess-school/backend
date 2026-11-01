@@ -31,7 +31,6 @@ const ABORT_TIMEOUT_MS = 30000;
 // Запись коалесцируется (пишется только последнее состояние), т.к. авторитет — Redis, а полный
 // итог партии всё равно фиксируется в Mongo при finish.
 const WRITE_BEHIND_MS = 1500;
-const PLAYER_FIELDS = 'uuid firstName lastName avatarUrl ratings';
 
 const opposite = (color) => (color === 'white' ? 'black' : 'white');
 const colorOfTurn = (chess) => (chess.turn() === 'w' ? 'white' : 'black');
@@ -474,8 +473,17 @@ const createGameManager = ({
 
     /** Полное состояние партии (любой статус) — для входа в партию и зрителей */
     const snapshot = async (gameId) => {
-        const doc = await LiveGame.findById(gameId).populate('whitePlayer', PLAYER_FIELDS).populate('blackPlayer', PLAYER_FIELDS).populate('createdBy', 'uuid firstName lastName').lean();
+        const doc = await LiveGame.findById(gameId).lean();
         if (!doc) throw notFound('Game not found.', 'GAME_NOT_FOUND');
+        // Игроки/создатель — app-level джойн через шов (замена populate, один батч-запрос).
+        {
+            const users = await userRepo.findByIdList([doc.whitePlayer, doc.blackPlayer, doc.createdBy].filter(Boolean).map(String));
+            const byId = new Map(users.map((u) => [String(u._id), u]));
+            const card = (id, fields) => (id && byId.get(String(id)) ? userRepo.pickUser(byId.get(String(id)), fields) : null);
+            doc.whitePlayer = card(doc.whitePlayer, ['uuid', 'firstName', 'lastName', 'avatarUrl', 'ratings']);
+            doc.blackPlayer = card(doc.blackPlayer, ['uuid', 'firstName', 'lastName', 'avatarUrl', 'ratings']);
+            doc.createdBy = card(doc.createdBy, ['uuid', 'firstName', 'lastName']);
+        }
         const speed = doc.timeControl.type;
         const state = doc.status === 'active' ? await load(gameId) : null;
         const t = now();

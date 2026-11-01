@@ -2,6 +2,7 @@
 
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 
 /**
  * @desc    Получить список всех чатов ("комнат") для текущего пользователя
@@ -11,17 +12,22 @@ const Message = require('../models/Message');
 const getMyConversations = async (req, res) => {
     // Находим все чаты, где текущий пользователь является участником
     const conversations = await Conversation.find({ members: req.user.id })
-        .populate({ // Подгружаем информацию об участниках, КРОМЕ себя
-            path: 'members',
-            select: 'uuid firstName lastName avatarUrl',
-            match: { _id: { $ne: req.user.id } } // $ne = Not Equal
-        })
-        .populate('groupContext', 'name') // Если это групповой чат, подгружаем название группы
-        .sort({ 'lastMessage.timestamp': -1 }); // Сортируем по последнему сообщению
+        .populate('groupContext', 'name') // Если это групповой чат, подгружаем название группы (Mongo-ссылка)
+        .sort({ 'lastMessage.timestamp': -1 }) // Сортируем по последнему сообщению
+        .lean();
+
+    // Участники — app-level джойн через шов (замена populate('members'), КРОМЕ себя — как match $ne).
+    const selfId = String(req.user.id);
+    const memberIds = conversations.flatMap((c) => (c.members || []).map(String)).filter((id) => id !== selfId);
+    const memberMap = await userRepo.userCardMap(memberIds, ['uuid', 'firstName', 'lastName', 'avatarUrl']);
 
     // Формируем красивый ответ для фронтенда
-    const formattedConversations = conversations.map(convo => {
-        const convoObject = convo.toObject();
+    const formattedConversations = conversations.map(convoObject => {
+        // Участники, кроме себя (как было в populate.match), только найденные
+        convoObject.members = (convoObject.members || [])
+            .map(String).filter((id) => id !== selfId)
+            .map((id) => memberMap.get(id) || null)
+            .filter(m => m !== null);
         // Определяем название чата
         if (convoObject.type === 'group' && convoObject.groupContext) {
             convoObject.name = convoObject.groupContext.name;
@@ -33,10 +39,6 @@ const getMyConversations = async (req, res) => {
             convoObject.name = 'Chat';
         }
         delete convoObject.groupContext;
-        
-        // Удаляем свое собственное `_id` из списка members
-        convoObject.members = convoObject.members.filter(m => m !== null);
-
         return convoObject;
     });
 
@@ -63,10 +65,14 @@ const getConversationMessages = async (req, res) => {
     const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
     
     const messages = await Message.find({ conversation: conversationId })
-        .populate('sender', 'uuid firstName lastName avatarUrl')
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(parseInt(limit, 10));
+        .limit(parseInt(limit, 10))
+        .lean();
+
+    // sender — app-level джойн через шов (замена populate('sender'))
+    const senderMap = await userRepo.userCardMap(messages.map((m) => m.sender), ['uuid', 'firstName', 'lastName', 'avatarUrl']);
+    for (const m of messages) m.sender = m.sender ? (senderMap.get(String(m.sender)) || null) : null;
 
     // Переворачиваем массив, чтобы на фронтенде он был в правильном порядке
     messages.reverse();

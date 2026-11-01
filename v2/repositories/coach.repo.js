@@ -107,6 +107,30 @@ async function findByIds(ids) {
   return CoachMongo.find({ _id: { $in: list } }).select('user').lean();
 }
 
+// Прикладной джойн: подставить doc[field] (ссылка на Coach) = coach-док с user-карточкой.
+// Батч через findByIds+attachUsers. Замена Mongoose populate({ path: field, populate: { path: 'user' } }).
+async function attachCoachField(docs, field = 'coach') {
+  const list = (Array.isArray(docs) ? docs : [docs]).filter(Boolean);
+  if (!list.length) return docs;
+  const ids = [...new Set(list.map((d) => d[field]).filter(Boolean).map(String))];
+  const coaches = await findByIds(ids);
+  await attachUsers(coaches);
+  const byId = new Map(coaches.map((c) => [String(c._id), c]));
+  for (const d of list) d[field] = d[field] ? (byId.get(String(d[field])) || null) : null;
+  return docs;
+}
+
+// Полные coach-доки по списку id (напр. авторы курса). Батч.
+async function findManyByIds(ids) {
+  const list = [...new Set((ids || []).map(String))];
+  if (!list.length) return [];
+  if (usePg()) {
+    const rows = await prisma().coach.findMany({ where: { id: { in: list } } });
+    return rows.map(pgRowToDoc);
+  }
+  return CoachMongo.find({ _id: { $in: list } }).lean();
+}
+
 // Профиль тренера с подставленным user (getMyCoachProfile).
 async function findByUserWithUser(userId) {
   const coach = await findByUser(userId);
@@ -212,7 +236,7 @@ async function findByClubWithUser(clubId, limit = 12) {
 module.exports = {
   findByUser, findById, existsById, findByIds, findByUserWithUser,
   upsertByUser, setVerifiedByUser,
-  findCatalog, countCatalog, findByClubWithUser,
+  findCatalog, countCatalog, findByClubWithUser, attachUsers, attachCoachField, findManyByIds,
   usePg,
   _pgRowToDoc: pgRowToDoc,
 };

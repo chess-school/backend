@@ -13,6 +13,7 @@ const mongoose = require('mongoose');
 const Assignment = require('../models/Assignment');
 const Submission = require('../models/Submission');
 const Schedule = require('../models/Schedule');
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const Group = require('../models/Group');
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
@@ -214,11 +215,13 @@ const listSubmissionsForReview = async (user, filters, club) => {
     const assignmentIds = await Assignment.find({ author: coachId, ...(club ? { club } : {}) }).distinct('_id');
     const submissions = await Submission.find({ assignment: { $in: assignmentIds }, status: filters.status || 'submitted' })
         .select(SUBMISSION_FIELDS)
-        .populate('student', 'uuid firstName lastName email')
         .populate({ path: 'assignment', select: 'title description dueDate schedule', populate: { path: 'schedule', select: 'title date' } })
         .sort({ submittedAt: -1 })
         .limit(200)
         .lean();
+    // student — app-level джойн через шов (замена populate('student'))
+    const studentMap = await userRepo.userCardMap(submissions.map((s) => s.student), ['uuid', 'firstName', 'lastName', 'email']);
+    for (const s of submissions) s.student = s.student ? (studentMap.get(String(s.student)) || null) : null;
     return submissions.map((s) => ({ ...toSubmissionDto(s), student: s.student, assignment: s.assignment }));
 };
 

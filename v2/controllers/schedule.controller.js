@@ -52,8 +52,11 @@ const createScheduleEvent = async (req, res) => {
         }
         recipients = [student];
     } else {
-        const group = await Group.findById(contextId).select('coach status members').populate('members', 'firstName lastName email');
+        const group = await Group.findById(contextId).select('coach status members').lean();
         if (!group) return res.status(404).json({ msg: req.t('controllers.schedule.groupNotFound'), code: 'GROUP_NOT_FOUND' });
+        // участники группы — app-level джойн через шов (замена populate('members'))
+        const memberMap = await userRepo.userCardMap(group.members, ['firstName', 'lastName', 'email']);
+        group.members = (group.members || []).map((id) => memberMap.get(String(id)) || null).filter(Boolean);
         if (String(group.coach) !== String(coachProfile._id)) {
             return res.status(403).json({ msg: req.t('controllers.schedule.notGroupOwner'), code: 'NOT_GROUP_OWNER' });
         }
@@ -133,9 +136,9 @@ const getMySchedule = async (req, res) => {
     }
 
     const events = await Schedule.find(query)
-        .populate({ path: 'coach', select: 'user', populate: { path: 'user', select: 'uuid firstName lastName' } })
         .sort({ date: 'asc' })
         .lean();
+    await coachRepo.attachCoachField(events); // джойн coach→user — app-level через шов
 
     // context.refId указывает то на группу, то на пользователя (ref у поля нет) — подтягиваем
     // названия групп и имена студентов двумя запросами на весь список, без N+1

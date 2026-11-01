@@ -20,9 +20,28 @@ const { emitToGame, emitToUser } = require('./playRealtime');
 const OPEN_CHALLENGE_TTL_MS = 60 * 60 * 1000;          // открытый вызов виден в лобби час
 const PRIVATE_CHALLENGE_TTL_MS = 24 * 60 * 60 * 1000;  // ссылка на вызов действует сутки
 const MAX_OPEN_CHALLENGES = 3;
-const PUBLIC_USER = 'uuid firstName lastName avatarUrl ratings';
+const CREATOR_CARD = ['uuid', 'firstName', 'lastName', 'avatarUrl', 'ratings'];
+const PLAYER_CARD = ['uuid', 'firstName', 'lastName'];
 
 const ratingIn = (user, speed) => ({ ...DEFAULT_RATING, ...(user?.ratings?.[speed] || {}) });
+
+// doc.createdBy = карточка пользователя — app-level джойн через шов (замена populate('createdBy')).
+const attachCreator = async (docs) => {
+    const list = (Array.isArray(docs) ? docs : [docs]).filter(Boolean);
+    const map = await userRepo.userCardMap(list.map((d) => d.createdBy), CREATOR_CARD);
+    for (const d of list) d.createdBy = d.createdBy ? (map.get(String(d.createdBy)) || null) : null;
+    return docs;
+};
+// doc.whitePlayer/blackPlayer = карточки — app-level джойн через шов (замена populate игроков).
+const attachPlayers = async (docs) => {
+    const list = (Array.isArray(docs) ? docs : [docs]).filter(Boolean);
+    const map = await userRepo.userCardMap(list.flatMap((d) => [d.whitePlayer, d.blackPlayer]), PLAYER_CARD);
+    for (const d of list) {
+        d.whitePlayer = d.whitePlayer ? (map.get(String(d.whitePlayer)) || null) : null;
+        d.blackPlayer = d.blackPlayer ? (map.get(String(d.blackPlayer)) || null) : null;
+    }
+    return docs;
+};
 
 const timeControlOrThrow = (minutes, increment) => {
     const tc = buildTimeControl({ minutes, increment });
@@ -74,14 +93,16 @@ const createChallenge = async (user, { minutes, increment, rated = true, color =
         ratingRange: !isPrivate && ratingRange ? Number(ratingRange) : null,
         rematchOf,
     });
-    const populated = await LiveGame.findById(doc._id).populate('createdBy', PUBLIC_USER).lean();
+    const populated = await LiveGame.findById(doc._id).lean();
+    await attachCreator(populated); // джойн createdBy — app-level через шов
     return challengeDto(populated, user.id);
 };
 
 /** Открытые вызовы лобби (свои — тоже, с mine: true) */
 const listOpenChallenges = async (user) => {
     const docs = await LiveGame.find({ status: 'created', isPrivate: false, createdAt: { $gt: new Date(Date.now() - OPEN_CHALLENGE_TTL_MS) } })
-        .sort({ createdAt: -1 }).limit(100).populate('createdBy', PUBLIC_USER).lean();
+        .sort({ createdAt: -1 }).limit(100).lean();
+    await attachCreator(docs); // джойн createdBy — app-level через шов
     return docs.map((d) => challengeDto(d, user?.id));
 };
 
@@ -100,8 +121,9 @@ const startActive = async (filter, set) => {
 
 /** Принять вызов -> { gameId } */
 const acceptChallenge = async (user, challengeId) => {
-    const doc = await LiveGame.findById(challengeId).populate('createdBy', PUBLIC_USER).lean();
+    const doc = await LiveGame.findById(challengeId).lean();
     if (!doc) throw notFound('Challenge not found.', 'CHALLENGE_NOT_FOUND');
+    await attachCreator(doc); // джойн createdBy — app-level через шов
     if (doc.status !== 'created') throw conflict('This challenge has already been accepted or cancelled.', 'CHALLENGE_TAKEN');
     if (String(doc.createdBy._id) === String(user.id)) throw conflict('You cannot accept your own challenge.', 'OWN_CHALLENGE');
     const ttl = doc.isPrivate ? PRIVATE_CHALLENGE_TTL_MS : OPEN_CHALLENGE_TTL_MS;
@@ -177,8 +199,9 @@ const overview = async (user) => {
         userRepo.findRatings(user.id),
         LiveGame.find({ status: 'active', $or: [{ whitePlayer: user.id }, { blackPlayer: user.id }] }).select('_id timeControl').lean(),
         LiveGame.find({ status: 'created', createdBy: user.id, createdAt: { $gt: new Date(Date.now() - PRIVATE_CHALLENGE_TTL_MS) } })
-            .sort({ createdAt: -1 }).limit(10).populate('createdBy', PUBLIC_USER).lean(),
+            .sort({ createdAt: -1 }).limit(10).lean(),
     ]);
+    await attachCreator(challenges); // джойн createdBy — app-level через шов
     const ratings = {};
     for (const speed of ['bullet', 'blitz', 'rapid', 'classical']) {
         const r = ratingIn(me, speed);
@@ -194,8 +217,8 @@ const overview = async (user) => {
 /** Мои последние партии */
 const myGames = async (user, { limit = 20 } = {}) => {
     const docs = await LiveGame.find({ status: { $in: ['finished', 'aborted'] }, $or: [{ whitePlayer: user.id }, { blackPlayer: user.id }] })
-        .sort({ finishedAt: -1 }).limit(Math.min(50, limit))
-        .populate('whitePlayer', 'uuid firstName lastName').populate('blackPlayer', 'uuid firstName lastName').lean();
+        .sort({ finishedAt: -1 }).limit(Math.min(50, limit)).lean();
+    await attachPlayers(docs); // джойн игроков — app-level через шов
     return docs.map((d) => ({
         _id: String(d._id), status: d.status, winner: d.winner, endReason: d.endReason, isRated: d.isRated, timeControl: d.timeControl,
         white: d.whitePlayer, black: d.blackPlayer, ratingChanges: d.ratingChanges, finishedAt: d.finishedAt, moves: d.moves?.length ?? 0,

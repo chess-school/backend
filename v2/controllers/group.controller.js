@@ -7,6 +7,15 @@ const { notify } = require('../services/notify');
 // Записи, по которым студент реально учится у тренера (отменённые/возвращённые не дают права на группу)
 const LIVE_CONTRACT_STATUSES = ['pending_payment', 'pending_approval', 'active'];
 
+// group.members = карточки пользователей — app-level джойн через шов (замена populate('members')).
+const MEMBER_CARD = ['uuid', 'firstName', 'lastName', 'avatarUrl'];
+const attachMembers = async (groups) => {
+    const list = (Array.isArray(groups) ? groups : [groups]).filter(Boolean);
+    const map = await userRepo.userCardMap(list.flatMap((g) => (g.members || []).map(String)), MEMBER_CARD);
+    for (const g of list) g.members = (g.members || []).map((id) => map.get(String(id)) || null).filter(Boolean);
+    return groups;
+};
+
 /**
  * @desc    Создание новой учебной группы
  * @route   POST /api/v2/groups
@@ -47,9 +56,8 @@ const getMyGroups = async (req, res) => {
 
     // Изоляция по клубу (#7): если активный клуб определён — только его группы
     const filter = { coach: coachProfile._id, ...(req.club ? { club: req.club } : {}) };
-    const groups = await Group.find(filter)
-                              .populate('members', 'uuid firstName lastName avatarUrl')
-                              .sort({ createdAt: -1 });
+    const groups = await Group.find(filter).sort({ createdAt: -1 }).lean();
+    await attachMembers(groups); // джойн участников — app-level через шов
 
     res.json({ data: groups });
 };
@@ -64,13 +72,15 @@ const getGroupById = async (req, res) => {
     const { groupId } = req.params;
 
     // Некорректный groupId -> CastError -> 400 (errorHandlerV2)
-    const group = await Group.findById(groupId)
-                             .populate('coach', 'user')
-                             .populate('members', 'uuid firstName lastName avatarUrl');
+    const group = await Group.findById(groupId).lean();
 
     if (!group) {
         return res.status(404).json({ msg: 'Group not found.', code: 'GROUP_NOT_FOUND' });
     }
+
+    // coach={_id,user} и members — app-level джойн через швы (замена populate coach/members)
+    if (group.coach) { const [c] = await coachRepo.findByIds([group.coach]); group.coach = c || null; }
+    await attachMembers(group);
 
     // ПРОВЕРКА ДОСТУПА: тренер группы, участник группы или администратор
     const coachUserId = group.coach ? String(group.coach.user) : null;

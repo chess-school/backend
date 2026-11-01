@@ -8,7 +8,7 @@
 
 const mongoose = require('mongoose');
 const Club = require('../models/Club');
-const SiteSettings = require('../models/SiteSettings');
+const siteSettingsRepo = require('../repositories/siteSettings.repo'); // шов content (mongo|pg по CONTENT_DB)
 const ClubMembership = require('../models/ClubMembership');
 
 // Нейтральные дефолты платформы — то, что показывается БЕЗ клубного контекста.
@@ -92,7 +92,7 @@ const getSettings = async (req, res) => {
     }
 
     // Неизвестный/чужой клуб → не 404, а платформенные дефолты (окно входа/футер всегда должны отрисоваться).
-    const settings = club ? await SiteSettings.findOne({ club: club._id }).lean() : null;
+    const settings = club ? await siteSettingsRepo.findByClub(club._id) : null;
     res.json({ data: buildPublic(club, settings) });
 };
 
@@ -106,7 +106,7 @@ const SOCIAL_KEYS = ['facebook', 'instagram', 'twitter', 'youtube', 'telegram'];
 const getAdminSettings = async (req, res) => {
     const [club, s] = await Promise.all([
         Club.findById(req.club).select('name slug logoUrl brand city').lean(),
-        SiteSettings.findOne({ club: req.club }).lean(),
+        siteSettingsRepo.findByClub(req.club),
     ]);
     res.json({
         data: {
@@ -122,38 +122,38 @@ const updateSettings = async (req, res) => {
     const b = req.body || {};
     const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined);
 
-    // Настройки сайта (upsert). undefined-поля не трогаем ($set только заданное).
-    const set = {};
-    if (b.siteName !== undefined) set.siteName = str(b.siteName, 120);
-    if (b.logoUrl !== undefined) set.logoUrl = str(b.logoUrl, 500);
-    if (b.tagline !== undefined) set.tagline = str(b.tagline, 200);
+    // Настройки сайта (частичный upsert через шов). Вложенный патч: заданные подполя auth/footer/
+    // socials накатываются поверх существующих (шов сохраняет соседние). undefined-поля не трогаем.
+    const patch = {};
+    if (b.siteName !== undefined) patch.siteName = str(b.siteName, 120);
+    if (b.logoUrl !== undefined) patch.logoUrl = str(b.logoUrl, 500);
+    if (b.tagline !== undefined) patch.tagline = str(b.tagline, 200);
     if (b.auth) {
-        if (b.auth.promoTitle !== undefined) set['auth.promoTitle'] = str(b.auth.promoTitle, 120);
-        if (b.auth.promoSubtitle !== undefined) set['auth.promoSubtitle'] = str(b.auth.promoSubtitle, 300);
-        if (b.auth.backgroundUrl !== undefined) set['auth.backgroundUrl'] = str(b.auth.backgroundUrl, 500);
-        if (b.auth.buttonColor !== undefined) set['auth.buttonColor'] = str(b.auth.buttonColor, 9);
+        patch.auth = {};
+        if (b.auth.promoTitle !== undefined) patch.auth.promoTitle = str(b.auth.promoTitle, 120);
+        if (b.auth.promoSubtitle !== undefined) patch.auth.promoSubtitle = str(b.auth.promoSubtitle, 300);
+        if (b.auth.backgroundUrl !== undefined) patch.auth.backgroundUrl = str(b.auth.backgroundUrl, 500);
+        if (b.auth.buttonColor !== undefined) patch.auth.buttonColor = str(b.auth.buttonColor, 9);
         if (Array.isArray(b.auth.facts)) {
-            set['auth.facts'] = b.auth.facts
+            patch.auth.facts = b.auth.facts
                 .map((f) => ({ value: str(f?.value, 24) || '', label: str(f?.label, 48) || '' }))
                 .filter((f) => f.value || f.label)
                 .slice(0, 3);
         }
     }
     if (b.footer) {
-        if (b.footer.text !== undefined) set['footer.text'] = str(b.footer.text, 300);
-        if (b.footer.legalName !== undefined) set['footer.legalName'] = str(b.footer.legalName, 120);
+        patch.footer = {};
+        if (b.footer.text !== undefined) patch.footer.text = str(b.footer.text, 300);
+        if (b.footer.legalName !== undefined) patch.footer.legalName = str(b.footer.legalName, 120);
     }
     if (b.socials && typeof b.socials === 'object') {
+        patch.socials = {};
         for (const k of SOCIAL_KEYS) {
-            if (b.socials[k] !== undefined) set[`socials.${k}`] = str(b.socials[k], 300) || '';
+            if (b.socials[k] !== undefined) patch.socials[k] = str(b.socials[k], 300) || '';
         }
     }
 
-    const settings = await SiteSettings.findOneAndUpdate(
-        { club: req.club },
-        { $set: { club: req.club, ...set } },
-        { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true },
-    ).lean();
+    const settings = await siteSettingsRepo.upsertByClub(req.club, patch);
 
     // Цвет бренда — в документ клуба (его читает публичная витрина и шапка)
     let club;

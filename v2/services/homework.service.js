@@ -18,7 +18,7 @@ const Group = require('../models/Group');
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
 const { notify: emitNotification } = require('./notify');
-const PuzzleBook = require('../models/PuzzleBook');
+const puzzleBookRepo = require('../repositories/puzzleBook.repo'); // шов content (mongo|pg по CONTENT_DB)
 const { forbidden, notFound, conflict, unprocessable } = require('../utils/apiError');
 
 const SUBMISSION_FIELDS = 'assignment student contentText attachment.contentType attachment.size attachment.filename status review submittedAt createdAt updatedAt';
@@ -129,7 +129,7 @@ const createPuzzleAssignment = async (user, payload, club) => {
     if (!['student', 'group'].includes(payload.contextType)) {
         throw unprocessable('contextType must be student or group.', 'VALIDATION_ERROR');
     }
-    const book = await PuzzleBook.findById(payload.puzzleBookId).select('title').lean();
+    const book = await puzzleBookRepo.findById(payload.puzzleBookId, { select: 'title' });
     if (!book) throw notFound('Puzzle book not found.', 'BOOK_NOT_FOUND');
 
     const plan = Array.isArray(payload.plan)

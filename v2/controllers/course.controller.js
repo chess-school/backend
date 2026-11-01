@@ -1,6 +1,6 @@
 // v2/controllers/course.controller.js
 
-const Course = require('../models/Course');
+const courseRepo = require('../repositories/course.repo'); // шов content (mongo|pg по CONTENT_DB)
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const Group = require('../models/Group');
 const mongoose = require('mongoose');
@@ -8,53 +8,35 @@ const mongoose = require('mongoose');
 const VISIBILITIES = ['draft', 'private', 'group', 'public'];
 
 // =================================================================
-//        ФИЛЬТР ДОСТУПА ПО ОБЛАСТИ ВИДИМОСТИ (Module 1)
+//        ДОСТУП ПО ОБЛАСТИ ВИДИМОСТИ (Module 1)
 // =================================================================
 
 /**
- * Строит mongo-фильтр, ограничивающий выборку курсов тем, что доступно текущему запросу.
- *  - ADMIN            → {} (видит всё, включая черновики и приватные);
+ * Семантический дескриптор доступа текущего запроса — его шов course.repo превращает в mongo/pg-запрос.
+ *  - ADMIN            → видит всё (включая черновики и приватные);
  *  - COACH            → публичные + свои (в любом статусе/архиве) + где он в allowedUsers;
  *  - USER / гость     → публичные + приватные (в allowedUsers) + групповые (его группы).
- * Легаси-курсы без поля visibility считаются публичными, если status === 'published'.
- * @returns {Promise<object>} фрагмент фильтра (возможно с $or); {} означает «без ограничений».
+ * @returns {Promise<{isAdmin:boolean, userId:?string, coachId:?string, groupIds:string[]}>}
  */
-async function buildVisibilityFilter(req) {
+async function buildAccess(req) {
     const roles = (req.user && req.user.roles) || [];
+    if (roles.includes('ADMIN')) return { isAdmin: true, userId: null, coachId: null, groupIds: [] };
 
-    // Админ видит абсолютно всё
-    if (roles.includes('ADMIN')) return {};
+    const userId = req.user && req.user.id ? req.user.id : null;
 
-    const userId = req.user && req.user.id ? new mongoose.Types.ObjectId(req.user.id) : null;
-    const notArchived = { isArchived: { $ne: true } };
-
-    // Легаси-совместимость: старые курсы без visibility, но опубликованные по status
-    const legacyPublic = { visibility: { $exists: false }, status: 'published', ...notArchived };
-
-    const or = [
-        { visibility: 'public', ...notArchived },
-        legacyPublic,
-    ];
-
-    // Тренер: плюс свои курсы (любые) и курсы, куда его добавили персонально
+    // Тренер: + свои курсы (любые) + где он в allowedUsers (групповые НЕ добавляем — как было).
     if (roles.includes('COACH')) {
         const coachProfile = await coachRepo.findByUser(req.user.id);
-        if (coachProfile) or.push({ authors: coachProfile._id }); // свои — в любом статусе/видимости, включая архив
-        if (userId) or.push({ allowedUsers: userId, visibility: { $ne: 'draft' }, ...notArchived });
-        return { $or: or };
+        return { isAdmin: false, userId, coachId: coachProfile ? String(coachProfile._id) : null, groupIds: [] };
     }
 
-    // Ученик (USER) / гость
+    // Ученик (USER) / гость: + allowedUsers + групповые
+    let groupIds = [];
     if (userId) {
-        or.push({ allowedUsers: userId, visibility: { $ne: 'draft' }, ...notArchived });
         const groups = await Group.find({ members: userId }).select('_id').lean();
-        const groupIds = groups.map((g) => g._id);
-        if (groupIds.length) {
-            or.push({ allowedGroups: { $in: groupIds }, visibility: { $ne: 'draft' }, ...notArchived });
-        }
+        groupIds = groups.map((g) => String(g._id));
     }
-
-    return { $or: or };
+    return { isAdmin: false, userId, coachId: null, groupIds };
 }
 
 // =================================================================
@@ -79,7 +61,7 @@ const createCourse = async (req, res) => {
         return res.status(400).json({ msg: `Invalid visibility. Must be one of: ${VISIBILITIES.join(', ')}.`, code: 'INVALID_VISIBILITY' });
     }
 
-    const course = new Course({
+    const course = await courseRepo.create({
         title,
         description,
         price,
@@ -94,7 +76,6 @@ const createCourse = async (req, res) => {
         ...(req.club ? { club: req.club } : {}),
     });
 
-    await course.save();
     res.status(201).json(course);
 };
 
@@ -111,8 +92,7 @@ const getMyCourses = async (req, res) => {
     }
 
     // Изоляция по клубу (#7): если активный клуб определён — только его курсы
-    const courses = await Course.find({ authors: coachProfile._id, ...(req.club ? { club: req.club } : {}) })
-                                .sort({ createdAt: -1 });
+    const courses = await courseRepo.findByAuthor(coachProfile._id, { club: req.club });
 
     res.json({ data: courses });
 };
@@ -148,7 +128,7 @@ const updateCourse = async (req, res) => {
     }
 
     // Находим курс и проверяем, является ли текущий пользователь его автором
-    const course = await Course.findById(courseId);
+    const course = await courseRepo.findById(courseId);
     if (!course) {
         return res.status(404).json({ msg: 'Course not found.' });
     }
@@ -162,7 +142,7 @@ const updateCourse = async (req, res) => {
 
     // Обновляем курс данными из запроса
     // runValidators: enum уровня/языка/видимости и минимальная цена проверяются и при обновлении
-    const updatedCourse = await Course.findByIdAndUpdate(courseId, { $set: updateData }, { new: true, runValidators: true });
+    const updatedCourse = await courseRepo.updateById(courseId, updateData, { runValidators: true });
 
     res.json(updatedCourse);
 };
@@ -186,11 +166,7 @@ const updateCourseStatus = async (req, res) => {
         return res.status(403).json({ msg: 'You must have a coach profile to manage courses.', code: 'COACH_PROFILE_REQUIRED' });
     }
 
-    const course = await Course.findOneAndUpdate(
-        { _id: courseId, authors: coachProfile._id },
-        { status },
-        { new: true }
-    );
+    const course = await courseRepo.updateStatusByAuthor(courseId, coachProfile._id, status);
 
     if (!course) {
         return res.status(404).json({ msg: 'Course not found or you do not have permission to change its status.' });
@@ -224,28 +200,16 @@ const attachAuthors = async (courses) => {
 const getPublicCourses = async (req, res) => {
     const { courseId, page = 1, limit = 10, level, tag, language } = req.query;
 
-    // Базовый фильтр доступа по роли/видимости (Module 1)
-    const query = await buildVisibilityFilter(req);
-
-    // Изоляция по клубу (#7): каталог ограничиваем клубом ТОЛЬКО если активный клуб определён
-    if (req.club) query.club = req.club;
-
-    if (courseId) {
-        if (!mongoose.Types.ObjectId.isValid(courseId)) return res.status(400).json({ msg: 'Invalid courseId format.' });
-        query._id = courseId;
+    if (courseId && !mongoose.Types.ObjectId.isValid(courseId)) {
+        return res.status(400).json({ msg: 'Invalid courseId format.' });
     }
-    if (level) query.level = level;
-    if (tag) query.tags = tag; // Ищет курсы, у которых есть указанный тег в массиве
-    if (language) query.language = language;
 
+    // Доступ по роли/видимости (Module 1) + доп. фильтры + изоляция по клубу (#7).
+    const access = await buildAccess(req);
+    const filters = { club: req.club, courseId, level, tag, language };
     const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
 
-    const coursesFromDB = await Course.find(query)
-        .select('-__v')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit, 10))
-        .lean();
+    const coursesFromDB = await courseRepo.findCatalog(access, filters, { skip, limit: parseInt(limit, 10) });
     await attachAuthors(coursesFromDB); // джойн авторов — app-level через швы
 
     // Если запрашивали один курс по courseId, возвращаем его как объект
@@ -254,7 +218,7 @@ const getPublicCourses = async (req, res) => {
     }
 
     // Для списка возвращаем данные с пагинацией
-    const totalCourses = await Course.countDocuments(query);
+    const totalCourses = await courseRepo.countCatalog(access, filters);
 
     res.json({
         data: coursesFromDB,
@@ -280,15 +244,13 @@ const getCourseById = async (req, res) => {
     }
 
     // Отличаем 404 (нет такого курса) от 403 (есть, но доступ запрещён)
-    const exists = await Course.exists({ _id: courseId });
+    const exists = await courseRepo.existsById(courseId);
     if (!exists) {
         return res.status(404).json({ msg: 'Course not found.', code: 'COURSE_NOT_FOUND' });
     }
 
-    const accessFilter = await buildVisibilityFilter(req);
-    const course = await Course.findOne({ _id: courseId, ...accessFilter })
-        .select('-__v')
-        .lean();
+    const access = await buildAccess(req);
+    const course = await courseRepo.findOneWithAccess(courseId, access);
 
     if (!course) {
         return res.status(403).json({ msg: 'Forbidden: this course is private.', code: 'COURSE_FORBIDDEN' });
@@ -306,5 +268,5 @@ module.exports = {
     updateCourseStatus,
     getPublicCourses,
     getCourseById,
-    buildVisibilityFilter, // экспортируем для переиспользования/тестов
+    buildAccess, // экспортируем для переиспользования/тестов
 };

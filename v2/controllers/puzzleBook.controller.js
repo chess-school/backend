@@ -1,7 +1,7 @@
 // v2/controllers/puzzleBook.controller.js
 
 const mongoose = require('mongoose');
-const PuzzleBook = require('../models/PuzzleBook');
+const puzzleBookRepo = require('../repositories/puzzleBook.repo'); // шов content (mongo|pg по CONTENT_DB)
 const PuzzleAttempt = require('../models/PuzzleAttempt');
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const Group = require('../models/Group');
@@ -57,7 +57,7 @@ const findVisibleBook = async (req, res, projection) => {
         res.status(404).json({ msg: 'Puzzle book not found.', code: 'BOOK_NOT_FOUND' });
         return null;
     }
-    const book = await PuzzleBook.findById(bookId, ensureAccessFields(projection));
+    const book = await puzzleBookRepo.findById(bookId, { select: ensureAccessFields(projection) });
     if (!book) {
         res.status(404).json({ msg: 'Puzzle book not found.', code: 'BOOK_NOT_FOUND' });
         return null;
@@ -90,7 +90,7 @@ const chapterIndex = (exercises) => {
  */
 const syncFromTask = async (req, res) => {
     const { taskId } = req.params;
-    let book = await PuzzleBook.findOne({ 'source.taskId': taskId }, { exercises: 0 });
+    let book = await puzzleBookRepo.findByTaskId(taskId);
 
     const title = typeof req.body.title === 'string' ? req.body.title.trim() : '';
     if (!book && (!title || title.length > MAX_TITLE)) {
@@ -106,7 +106,7 @@ const syncFromTask = async (req, res) => {
 
     if (!book) {
         try {
-            book = await PuzzleBook.create({
+            book = await puzzleBookRepo.create({
                 title,
                 description: typeof req.body.description === 'string' ? req.body.description.slice(0, MAX_TEXT) : '',
                 createdBy: req.user.id,
@@ -117,7 +117,7 @@ const syncFromTask = async (req, res) => {
         } catch (e) {
             if (e.code !== 11000) throw e;
             // Параллельный запрос успел создать задачник для этой задачи — дописываем в него
-            book = await PuzzleBook.findOne({ 'source.taskId': taskId }, { exercises: 0 });
+            book = await puzzleBookRepo.findByTaskId(taskId);
         }
     }
 
@@ -126,11 +126,7 @@ const syncFromTask = async (req, res) => {
         if (book.source.importedChapters.includes(filename)) continue;
         const exercises = await loadChapterExercises(taskId, filename, req.headers.authorization);
         // Атомарно: глава добавляется, только если её ещё нет (защита от двойного клика)
-        const updated = await PuzzleBook.findOneAndUpdate(
-            { _id: book._id, 'source.importedChapters': { $ne: filename } },
-            { $push: { exercises: { $each: exercises }, 'source.importedChapters': filename } },
-            { new: true, projection: { exercises: 0 } },
-        );
+        const updated = await puzzleBookRepo.addChapter(book._id, filename, exercises);
         if (updated) {
             book = updated;
             added += exercises.length;
@@ -140,7 +136,7 @@ const syncFromTask = async (req, res) => {
     // Упражнения с решением становятся задачами раздела «Задачи» (видны ученикам после публикации книги)
     const puzzles = added > 0 ? await syncBookPuzzles(book._id) : null;
 
-    const full = await PuzzleBook.findById(book._id, { 'exercises.chapter': 1, title: 1 });
+    const full = await puzzleBookRepo.findById(book._id, { select: { 'exercises.chapter': 1, title: 1 } });
     res.status(added > 0 && full.exercises.length === added ? 201 : 200).json({
         data: {
             _id: full._id,
@@ -160,37 +156,16 @@ const syncFromTask = async (req, res) => {
  * @access  Private
  */
 const getBooks = async (req, res) => {
-    let match;
+    // Семантика доступа (видимость считает шов одинаково для mongo|pg).
+    let access;
     if (isStaff(req.user)) {
-        match = {}; // тренеры и админы видят все задачники (как и раньше)
+        access = { isStaff: true }; // тренеры и админы видят все задачники
     } else {
-        const userId = new mongoose.Types.ObjectId(String(req.user.id));
-        const groups = await Group.find({ members: userId }).select('_id').lean();
-        const groupIds = groups.map((g) => g._id);
-        const notArchived = { isArchived: { $ne: true } };
-        match = { $or: [
-            // легаси/публичные: опубликованные и не помеченные как private/group ($nin матчит и отсутствующее поле)
-            { status: 'published', visibility: { $nin: ['private', 'group'] }, ...notArchived },
-            { visibility: 'public', ...notArchived },
-            { visibility: 'private', allowedUsers: userId, ...notArchived },
-            { visibility: 'group', allowedGroups: { $in: groupIds }, ...notArchived },
-        ] };
+        const groups = await Group.find({ members: req.user.id }).select('_id').lean();
+        access = { isStaff: false, userId: req.user.id, groupIds: groups.map((g) => g._id) };
     }
     // Изоляция по клубу (#7): если активный клуб определён — только его задачники
-    const clubMatch = req.club ? { club: new mongoose.Types.ObjectId(String(req.club)) } : {};
-    const books = await PuzzleBook.aggregate([
-        { $match: { ...match, ...clubMatch } },
-        { $sort: { createdAt: -1 } },
-        {
-            $project: {
-                title: 1, description: 1, status: 1, visibility: 1, isArchived: 1,
-                allowedUsersCount: { $size: { $ifNull: ['$allowedUsers', []] } },
-                allowedGroupsCount: { $size: { $ifNull: ['$allowedGroups', []] } },
-                createdAt: 1, updatedAt: 1,
-                exercisesCount: { $size: '$exercises' },
-            },
-        },
-    ]);
+    const books = await puzzleBookRepo.listBooks(access, req.club || null);
     res.json({ data: books });
 };
 
@@ -214,19 +189,21 @@ const updateBook = async (req, res) => {
     const book = await findVisibleBook(req, res, { exercises: 0 });
     if (!book) return;
 
+    // Собираем патч (вместо мутации live-дока) и пишем через шов — одинаково для mongo|pg.
+    const patch = {};
     const { title, description, status, solveSettings } = req.body;
     if (title !== undefined) {
         if (typeof title !== 'string' || !title.trim() || title.length > MAX_TITLE) {
             return res.status(400).json({ msg: 'Invalid title.', code: 'VALIDATION_ERROR' });
         }
-        book.title = title.trim();
+        patch.title = title.trim();
     }
-    if (description !== undefined) book.description = String(description).slice(0, MAX_TEXT);
+    if (description !== undefined) patch.description = String(description).slice(0, MAX_TEXT);
     if (status !== undefined) {
         if (!['draft', 'published'].includes(status)) {
             return res.status(400).json({ msg: 'Invalid status.', code: 'VALIDATION_ERROR' });
         }
-        book.status = status;
+        patch.status = status;
     }
     // --- Управление доступом (Module 1) ---
     const { visibility, allowedUsers, allowedGroups, isArchived } = req.body;
@@ -234,30 +211,30 @@ const updateBook = async (req, res) => {
         if (!['draft', 'private', 'group', 'public'].includes(visibility)) {
             return res.status(400).json({ msg: 'Invalid visibility.', code: 'INVALID_VISIBILITY' });
         }
-        book.visibility = visibility;
+        patch.visibility = visibility;
     }
     if (allowedUsers !== undefined) {
         if (!Array.isArray(allowedUsers) || !allowedUsers.every((id) => mongoose.Types.ObjectId.isValid(id))) {
             return res.status(400).json({ msg: 'allowedUsers must be an array of user IDs.', code: 'VALIDATION_ERROR' });
         }
-        book.allowedUsers = allowedUsers;
+        patch.allowedUsers = allowedUsers;
     }
     if (allowedGroups !== undefined) {
         if (!Array.isArray(allowedGroups) || !allowedGroups.every((id) => mongoose.Types.ObjectId.isValid(id))) {
             return res.status(400).json({ msg: 'allowedGroups must be an array of group IDs.', code: 'VALIDATION_ERROR' });
         }
-        book.allowedGroups = allowedGroups;
+        patch.allowedGroups = allowedGroups;
     }
-    if (isArchived !== undefined) book.isArchived = !!isArchived;
+    if (isArchived !== undefined) patch.isArchived = !!isArchived;
     // Настройки режима решения — частичное обновление: присланные поля перекрывают текущие (с клампом)
     if (solveSettings !== undefined && solveSettings && typeof solveSettings === 'object') {
-        const cur = (book.solveSettings && book.solveSettings.toObject) ? book.solveSettings.toObject() : (book.solveSettings || {});
+        const cur = book.solveSettings || {};
         const clampInt = (v, lo, hi, dflt) => {
             const n = Math.round(Number(v));
             return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt;
         };
         const bool = (v, dflt) => (typeof v === 'boolean' ? v : dflt);
-        book.solveSettings = {
+        patch.solveSettings = {
             hintsEnabled: bool(solveSettings.hintsEnabled, cur.hintsEnabled ?? true),
             hintUnlockMinutes: solveSettings.hintUnlockMinutes !== undefined ? clampInt(solveSettings.hintUnlockMinutes, 0, 180, cur.hintUnlockMinutes ?? 10) : (cur.hintUnlockMinutes ?? 10),
             hintUnlockMistakes: solveSettings.hintUnlockMistakes !== undefined ? clampInt(solveSettings.hintUnlockMistakes, 0, 50, cur.hintUnlockMistakes ?? 5) : (cur.hintUnlockMistakes ?? 5),
@@ -265,12 +242,12 @@ const updateBook = async (req, res) => {
             showPlayerNames: bool(solveSettings.showPlayerNames, cur.showPlayerNames ?? true),
         };
     }
-    await book.save();
+    const saved = await puzzleBookRepo.updateFields(book._id, patch);
     // Опубликованная книга — её задачи появляются в общем потоке «Задачи»; снятая — исчезают
-    await updateBookPuzzlesMeta(book);
-    res.json({ data: { _id: book._id, title: book.title, description: book.description, status: book.status,
-        visibility: book.visibility, allowedUsers: book.allowedUsers, allowedGroups: book.allowedGroups,
-        isArchived: book.isArchived, solveSettings: book.solveSettings } });
+    await updateBookPuzzlesMeta(saved);
+    res.json({ data: { _id: saved._id, title: saved.title, description: saved.description, status: saved.status,
+        visibility: saved.visibility, allowedUsers: saved.allowedUsers, allowedGroups: saved.allowedGroups,
+        isArchived: saved.isArchived, solveSettings: saved.solveSettings } });
 };
 
 /**
@@ -284,32 +261,29 @@ const updateExercise = async (req, res) => {
         return res.status(404).json({ msg: 'Exercise not found.', code: 'EXERCISE_NOT_FOUND' });
     }
 
-    const update = {};
+    const fields = {};
     for (const field of ['title', 'fen', 'comment', 'hint', 'solution']) {
         const value = req.body[field];
         if (value === undefined) continue;
         if (typeof value !== 'string' || value.length > MAX_TEXT) {
             return res.status(400).json({ msg: `Invalid field: ${field}.`, code: 'VALIDATION_ERROR' });
         }
-        update[`exercises.$.${field}`] = field === 'solution' ? value.trim() : value;
+        fields[field] = field === 'solution' ? value.trim() : value;
     }
     // Полная проверка FEN и легальности решения — на клиенте (chess.js); здесь только базовая форма
-    if (update['exercises.$.fen'] !== undefined && update['exercises.$.fen'].trim().split(/\s+/).length !== 6) {
+    if (fields.fen !== undefined && fields.fen.trim().split(/\s+/).length !== 6) {
         return res.status(400).json({ msg: 'FEN must have 6 fields.', code: 'VALIDATION_ERROR' });
     }
-    if (update['exercises.$.title'] !== undefined && !update['exercises.$.title'].trim()) {
+    if (fields.title !== undefined && !fields.title.trim()) {
         return res.status(400).json({ msg: 'Title is required.', code: 'VALIDATION_ERROR' });
     }
 
     // Позиция и решение проверяются и на сервере: битые данные не должны попасть в базу задач
-    if (update['exercises.$.fen'] !== undefined || update['exercises.$.solution'] !== undefined) {
-        const current = await PuzzleBook.findOne(
-            { _id: bookId, 'exercises._id': exerciseId },
-            { exercises: { $elemMatch: { _id: exerciseId } } },
-        ).lean();
+    if (fields.fen !== undefined || fields.solution !== undefined) {
+        const current = await puzzleBookRepo.getExercise(bookId, exerciseId);
         if (!current) return res.status(404).json({ msg: 'Exercise not found.', code: 'EXERCISE_NOT_FOUND' });
-        const fen = update['exercises.$.fen'] ?? current.exercises[0].fen;
-        const solution = update['exercises.$.solution'] ?? current.exercises[0].solution;
+        const fen = fields.fen ?? current.fen;
+        const solution = fields.solution ?? current.solution;
         const line = parseMainline(fen, solution);
         if (line.error) {
             const field = line.error.startsWith('Invalid FEN') ? 'fen' : 'solution';
@@ -317,16 +291,12 @@ const updateExercise = async (req, res) => {
         }
     }
 
-    const book = await PuzzleBook.findOneAndUpdate(
-        { _id: bookId, 'exercises._id': exerciseId },
-        { $set: update },
-        { new: true, projection: { title: 1, status: 1, exercises: { $elemMatch: { _id: exerciseId } } } },
-    );
-    if (!book) {
+    const result = await puzzleBookRepo.updateExerciseFields(bookId, exerciseId, fields);
+    if (!result) {
         return res.status(404).json({ msg: 'Exercise not found.', code: 'EXERCISE_NOT_FOUND' });
     }
-    const puzzle = await syncExercisePuzzle(book, book.exercises[0]);
-    res.json({ data: book.exercises[0], puzzle });
+    const puzzle = await syncExercisePuzzle(result.book, result.exercise);
+    res.json({ data: result.exercise, puzzle });
 };
 
 /**
@@ -371,10 +341,7 @@ const recordAttempt = async (req, res) => {
     // Персист: рейтинг ученика и рейтинг конкретного упражнения (атомарно через позиционный $)
     await Promise.all([
         userRepo.updatePuzzleRating(req.user.id, change.newUserRating),
-        PuzzleBook.updateOne(
-            { _id: book._id, 'exercises._id': exerciseId },
-            { $set: { 'exercises.$.rating': change.newPuzzleRating }, $inc: { 'exercises.$.ratingAttempts': 1 } },
-        ),
+        puzzleBookRepo.setExerciseRating(book._id, exerciseId, change.newPuzzleRating),
     ]);
 
     res.status(201).json({ data: {

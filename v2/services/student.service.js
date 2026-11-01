@@ -13,7 +13,7 @@
 const mongoose = require('mongoose');
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
-const Course = require('../models/Course');
+const courseRepo = require('../repositories/course.repo'); // шов content (mongo|pg по CONTENT_DB)
 const Group = require('../models/Group');
 const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
 const paymentRepo = require('../repositories/payment.repo');
@@ -140,7 +140,7 @@ const listStudents = async (scope, filters) => {
         if (e.group) groupIds.add(String(e.group));
     }));
     const [courses, groups] = await Promise.all([
-        Course.find({ _id: { $in: [...courseIds] } }).select('title').lean(),
+        courseRepo.findByIds([...courseIds]),
         Group.find({ _id: { $in: [...groupIds] } }).select('name').lean(),
     ]);
     const courseById = new Map(courses.map((c) => [String(c._id), { _id: c._id, title: c.title }]));
@@ -277,7 +277,7 @@ const enrollStudent = async (scope, payload) => {
         throw notFound('User not found. The student must register on the site first.', 'USER_NOT_FOUND');
     }
 
-    const course = await Course.findById(payload.courseId).select('authors price status title').lean();
+    const course = await courseRepo.findById(payload.courseId);
     if (!course) throw notFound('Course not found.', 'COURSE_NOT_FOUND');
     if (course.status === 'archived') throw unprocessable('Cannot enroll into an archived course.', 'COURSE_ARCHIVED');
 

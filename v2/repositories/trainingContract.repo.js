@@ -16,7 +16,7 @@
 
 const mongoose = require('mongoose');
 const ContractMongo = require('../models/TrainingContract');
-const Course = require('../models/Course');
+const courseRepo = require('../repositories/course.repo'); // шов content (mongo|pg по CONTENT_DB)
 const Group = require('../models/Group');
 const userRepo = require('./user.repo');
 const paymentRepo = require('./payment.repo');
@@ -219,7 +219,7 @@ async function deleteOne(filter) {
 async function attachCourses(contracts, fields) {
   const ids = [...new Set(contracts.map((c) => String(c.course)).filter(Boolean))];
   if (!ids.length) return;
-  const docs = await Course.find({ _id: { $in: ids } }).select(fields.join(' ')).lean();
+  const docs = await courseRepo.findByIds(ids);
   const byId = new Map(docs.map((d) => [String(d._id), project(d, fields)]));
   for (const c of contracts) c.course = byId.get(String(c.course)) || { _id: c.course };
 }
@@ -295,7 +295,7 @@ async function findStudentEnrollments(studentId, coachId) {
 async function findOneWithCourse(filter) {
   const contract = await findOne(filter);
   if (!contract) return null;
-  const course = await Course.findById(contract.course).lean();
+  const course = await courseRepo.findById(contract.course);
   contract.course = course || null;
   return contract;
 }

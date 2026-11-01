@@ -7,9 +7,9 @@
 // Ответ ВСЕГДА валиден: пустые поля клуба заменяются нейтральными дефолтами платформы.
 
 const mongoose = require('mongoose');
-const Club = require('../models/Club');
+const clubRepo = require('../repositories/club.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const siteSettingsRepo = require('../repositories/siteSettings.repo'); // шов content (mongo|pg по CONTENT_DB)
-const ClubMembership = require('../models/ClubMembership');
+const membershipRepo = require('../repositories/clubMembership.repo'); // шов tenant
 
 // Нейтральные дефолты платформы — то, что показывается БЕЗ клубного контекста.
 // Никакого «Mind Over Board» и выдуманных цифр: факты и соцсети пусты, пока клуб их не заполнит.
@@ -79,14 +79,14 @@ const getSettings = async (req, res) => {
 
     const slug = req.query.slug ? String(req.query.slug).toLowerCase().trim() : '';
     if (slug) {
-        club = await Club.findOne({ slug, status: 'active' }).select('name slug city logoUrl brand').lean();
+        club = await clubRepo.findActiveBySlug(slug);
     } else {
         // Без slug — пробуем активный клуб залогиненного пользователя (X-Club-Id, только для его клуба).
         const headerId = req.headers['x-club-id'];
         if (headerId && req.user && req.user.id && mongoose.Types.ObjectId.isValid(String(headerId))) {
-            const member = await ClubMembership.findOne({ club: headerId, user: req.user.id, status: 'active' }).lean();
+            const member = await membershipRepo.findActive(headerId, req.user.id);
             if (member) {
-                club = await Club.findOne({ _id: headerId, status: 'active' }).select('name slug city logoUrl brand').lean();
+                club = await clubRepo.findActiveById(headerId);
             }
         }
     }
@@ -105,7 +105,7 @@ const SOCIAL_KEYS = ['facebook', 'instagram', 'twitter', 'youtube', 'telegram'];
  *  плюс имя/цвет/лого клуба для предзаполнения. */
 const getAdminSettings = async (req, res) => {
     const [club, s] = await Promise.all([
-        Club.findById(req.club).select('name slug logoUrl brand city').lean(),
+        clubRepo.findById(req.club),
         siteSettingsRepo.findByClub(req.club),
     ]);
     res.json({
@@ -158,10 +158,9 @@ const updateSettings = async (req, res) => {
     // Цвет бренда — в документ клуба (его читает публичная витрина и шапка)
     let club;
     if (typeof b.primaryColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(b.primaryColor.trim())) {
-        club = await Club.findByIdAndUpdate(req.club, { $set: { 'brand.primaryColor': b.primaryColor.trim() } }, { new: true })
-            .select('name slug logoUrl brand city').lean();
+        club = await clubRepo.updateById(req.club, { brand: { primaryColor: b.primaryColor.trim() } });
     } else {
-        club = await Club.findById(req.club).select('name slug logoUrl brand city').lean();
+        club = await clubRepo.findById(req.club);
     }
 
     res.json({ data: { settings, public: buildPublic(club, settings) } });

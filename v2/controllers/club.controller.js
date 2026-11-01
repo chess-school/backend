@@ -1,8 +1,8 @@
 // club.controller.js — клубы пользователя (переключатель), создание клуба (онбординг), детали, сводка.
 const clubService = require('../services/club.service');
-const Club = require('../models/Club');
-const ClubMembership = require('../models/ClubMembership');
-const Group = require('../models/Group');
+const clubRepo = require('../repositories/club.repo'); // шов tenant (mongo|pg по TENANT_DB)
+const membershipRepo = require('../repositories/clubMembership.repo'); // шов tenant
+const groupRepo = require('../repositories/group.repo'); // шов tenant
 const scheduleRepo = require('../repositories/schedule.repo'); // шов learning (mongo|pg по LEARNING_DB)
 const paymentRepo = require('../repositories/payment.repo');
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
@@ -44,10 +44,10 @@ const getOverview = async (req, res) => {
     const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
 
     const [club, students, trainers, groupsRaw, todayRaw, upcomingGroup, payments] = await Promise.all([
-        Club.findById(clubId).lean(),
-        ClubMembership.countDocuments({ club: clubId, role: 'student', status: 'active' }),
-        ClubMembership.countDocuments({ club: clubId, role: 'trainer', status: 'active' }),
-        Group.find({ club: clubId }).lean(),
+        clubRepo.findById(clubId),
+        membershipRepo.countByClubRole(clubId, 'student', 'active'),
+        membershipRepo.countByClubRole(clubId, 'trainer', 'active'),
+        groupRepo.findByClub(clubId),
         scheduleRepo.findClubEventsInRange(clubId, dayStart, dayEnd),
         scheduleRepo.findClubUpcomingGroup(clubId, now),
         paymentRepo.findByClub(clubId),
@@ -113,14 +113,13 @@ const getOverview = async (req, res) => {
  *  Отдаёт только безопасные публичные поля + (если залогинен) членство пользователя. */
 const getBySlug = async (req, res) => {
     const slug = String(req.params.slug || '').toLowerCase();
-    const club = await Club.findOne({ slug, status: 'active' })
-        .select('name slug city logoUrl brand plan').lean();
+    const club = await clubRepo.findActiveBySlug(slug);
     if (!club) throw notFound('Club not found.', 'CLUB_NOT_FOUND');
 
     // Публичная витрина: тренеры клуба (верхнеуровнево) и число групп
     const [coachesRaw, groupsCount] = await Promise.all([
         coachRepo.findByClubWithUser(club._id, 12), // джойн user — в шве (app-level)
-        Group.countDocuments({ club: club._id }),
+        groupRepo.countByClub(club._id),
     ]);
     const coaches = coachesRaw.map((c) => ({
         name: c.user ? `${c.user.firstName || ''} ${c.user.lastName || ''}`.trim() : '—',
@@ -130,7 +129,7 @@ const getBySlug = async (req, res) => {
 
     let membership = null;
     if (req.user && req.user.id) {
-        const m = await ClubMembership.findOne({ club: club._id, user: req.user.id, status: 'active' }).lean();
+        const m = await membershipRepo.findActive(club._id, req.user.id);
         if (m) membership = { role: m.role, status: m.status };
     }
 

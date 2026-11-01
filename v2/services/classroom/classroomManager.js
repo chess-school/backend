@@ -11,7 +11,7 @@
 
 const { Chess } = require('chess.js');
 const { getClient, isClustered, withRedisLock } = require('../play/redis');
-const Group = require('../../models/Group');
+const groupRepo = require('../../repositories/group.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const scheduleRepo = require('../../repositories/schedule.repo'); // шов learning (mongo|pg по LEARNING_DB)
 const coachRepo = require('../../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const { notFound, forbidden, badRequest } = require('../../utils/apiError');
@@ -120,7 +120,7 @@ const authorize = async (roomId, user) => {
         return { role: isCoach || isAdmin ? 'coach' : 'student', coachUserId };
     }
 
-    const group = await Group.findById(roomId).select('coach members status').lean();
+    const group = await groupRepo.findById(roomId);
     if (!group) throw notFound('Classroom not found.', 'CLASSROOM_NOT_FOUND');
     // coach={_id,user} — app-level джойн через шов (замена populate('coach','user'))
     if (group.coach) { const [c] = await coachRepo.findByIds([group.coach]); group.coach = c || null; }

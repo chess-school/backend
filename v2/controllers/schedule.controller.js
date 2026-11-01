@@ -1,6 +1,6 @@
 const scheduleRepo = require('../repositories/schedule.repo'); // шов learning (mongo|pg по LEARNING_DB)
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
-const Group = require('../models/Group');
+const groupRepo = require('../repositories/group.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
 const assignmentRepo = require('../repositories/assignment.repo'); // шов learning
@@ -52,7 +52,7 @@ const createScheduleEvent = async (req, res) => {
         }
         recipients = [student];
     } else {
-        const group = await Group.findById(contextId).select('coach status members').lean();
+        const group = await groupRepo.findById(contextId);
         if (!group) return res.status(404).json({ msg: req.t('controllers.schedule.groupNotFound'), code: 'GROUP_NOT_FOUND' });
         // участники группы — app-level джойн через шов (замена populate('members'))
         const memberMap = await userRepo.userCardMap(group.members, ['firstName', 'lastName', 'email']);
@@ -109,7 +109,7 @@ const getMySchedule = async (req, res) => {
 
     // Группы пользователя (индекс Group.members) и его профиль тренера — параллельно
     const [userGroups, coachProfile] = await Promise.all([
-        Group.find({ members: userId }).select('_id'),
+        groupRepo.findByMember(userId),
         coachRepo.findByUser(userId),
     ]);
     const groupIds = userGroups.map(g => g._id);
@@ -129,7 +129,7 @@ const getMySchedule = async (req, res) => {
     // названия групп и имена студентов двумя запросами на весь список, без N+1
     const refIds = (type) => [...new Set(events.filter(e => e.context.type === type).map(e => String(e.context.refId)))];
     const [groups, students] = await Promise.all([
-        Group.find({ _id: { $in: refIds('group') } }).select('name').lean(),
+        groupRepo.findByIds(refIds('group')),
         userRepo.findByIdList(refIds('individual')),
     ]);
     const byId = new Map([...groups, ...students].map(doc => [String(doc._id), doc]));

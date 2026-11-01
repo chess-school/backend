@@ -14,7 +14,7 @@ const mongoose = require('mongoose');
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const courseRepo = require('../repositories/course.repo'); // шов content (mongo|pg по CONTENT_DB)
-const Group = require('../models/Group');
+const groupRepo = require('../repositories/group.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
 const paymentRepo = require('../repositories/payment.repo');
 const submissionRepo = require('../repositories/submission.repo'); // шов learning (mongo|pg по LEARNING_DB)
@@ -141,7 +141,7 @@ const listStudents = async (scope, filters) => {
     }));
     const [courses, groups] = await Promise.all([
         courseRepo.findByIds([...courseIds]),
-        Group.find({ _id: { $in: [...groupIds] } }).select('name').lean(),
+        groupRepo.findByIds([...groupIds]),
     ]);
     const courseById = new Map(courses.map((c) => [String(c._id), { _id: c._id, title: c.title }]));
     const groupById = new Map(groups.map((g) => [String(g._id), { _id: g._id, name: g.name }]));
@@ -184,12 +184,11 @@ const getStudent = async (scope, uuid) => {
     }
 
     const contractIds = contracts.map((c) => c._id);
-    const groupsFilter = { members: student._id, ...(coachFilter.coach ? { coach: coachFilter.coach } : {}) };
     const assignmentFilter = coachFilter.coach ? { author: coachFilter.coach } : null;
 
     const [payments, groups, assignmentIds] = await Promise.all([
         paymentRepo.findByContracts(contractIds),
-        Group.find(groupsFilter).select('name status coach').lean(),
+        groupRepo.findByMember(student._id, { coach: coachFilter.coach || null }),
         assignmentFilter ? assignmentRepo.distinctIdsByAuthor({ author: coachFilter.coach }) : Promise.resolve(null),
     ]);
     const groupIds = groups.map((g) => g._id);
@@ -236,7 +235,7 @@ const getStudent = async (scope, uuid) => {
 
 /** Группа должна принадлежать тренеру записи и быть активной */
 const loadGroupForCoach = async (groupId, coachId) => {
-    const group = await Group.findById(groupId).select('coach status name').lean();
+    const group = await groupRepo.findById(groupId);
     if (!group) throw notFound('Group not found.', 'GROUP_NOT_FOUND');
     if (String(group.coach) !== String(coachId)) {
         throw unprocessable("The group must belong to the enrollment's coach.", 'GROUP_COACH_MISMATCH');
@@ -249,7 +248,7 @@ const loadGroupForCoach = async (groupId, coachId) => {
 const releaseGroupMembership = async (studentId, groupId) => {
     if (!groupId) return;
     const stillLinked = await contractRepo.exists({ student: studentId, group: groupId });
-    if (!stillLinked) await Group.updateOne({ _id: groupId }, { $pull: { members: studentId } });
+    if (!stillLinked) await groupRepo.removeMember(groupId, studentId);
 };
 
 const assertDateOrder = (startDate, endDate) => {
@@ -315,7 +314,7 @@ const enrollStudent = async (scope, payload) => {
         if (e.code === 'DUPLICATE_ENROLLMENT') throw conflict('The student is already enrolled in this course.', 'ALREADY_ENROLLED');
         throw e;
     }
-    if (group) await Group.updateOne({ _id: group._id }, { $addToSet: { members: student._id } });
+    if (group) await groupRepo.addMember(group._id, student._id);
 
     return getStudent(scope, student.uuid);
 };
@@ -375,7 +374,7 @@ const updateEnrollment = async (scope, uuid, contractId, payload) => {
 
     // Синхронизация Group.members с контрактом
     if (String(newGroupId) !== String(contract.group)) {
-        if (newGroupId) await Group.updateOne({ _id: newGroupId }, { $addToSet: { members: student._id } });
+        if (newGroupId) await groupRepo.addMember(newGroupId, student._id);
         await releaseGroupMembership(student._id, contract.group);
     }
     return getStudent(scope, uuid);

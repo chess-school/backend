@@ -11,7 +11,7 @@ const userRepo = require('../repositories/user.repo'); // шов identity (mongo
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const courseRepo = require('../repositories/course.repo'); // шов content (mongo|pg по CONTENT_DB)
 const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
-const CoachRequest = require('../models/CoachRequest');
+const coachReqRepo = require('../repositories/coachRequest.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const { notify: emitNotification } = require('./notify');
 const studentService = require('./student.service');
 const { conflict, forbidden, notFound, unprocessable } = require('../utils/apiError');
@@ -67,27 +67,25 @@ const createRequest = async (user, coachId, { experience, goals }, club) => {
 
     const linked = await contractRepo.exists({ student: user.id, coach: coach._id, status: { $in: LINKED_STATUSES } });
     if (linked) throw conflict('You are already a student of this coach.', 'ALREADY_STUDENT');
-    if (await CoachRequest.exists({ student: user.id, coach: coach._id, status: 'pending' })) {
+    if (await coachReqRepo.existsPending(user.id, coach._id)) {
         throw conflict('You have already sent a request to this coach.', 'REQUEST_PENDING');
     }
 
     let request;
     try {
-        request = await CoachRequest.create({ student: user.id, coach: coach._id, experience, goals: goals || '', ...(club ? { club } : {}) });
+        request = await coachReqRepo.create({ student: user.id, coach: coach._id, experience, goals: goals || '', ...(club ? { club } : {}) });
     } catch (e) {
         if (e.code === 11000) throw conflict('You have already sent a request to this coach.', 'REQUEST_PENDING');
         throw e;
     }
     const student = await userRepo.findById(user.id);
     await notify(coach.user, 'COACH_REQUEST', `${student?.firstName ?? ''} ${student?.lastName ?? ''}`.trim() || 'New student request', '/inbox');
-    return toDto(request.toObject());
+    return toDto(request);
 };
 
 /** Заявки, отправленные учеником (для статуса на карточках тренеров) */
 const listSentRequests = async (user) => {
-    const requests = await CoachRequest.find({ student: user.id })
-        .sort({ createdAt: -1 })
-        .lean();
+    const requests = await coachReqRepo.findByStudent(user.id);
     await attachCoaches(requests); // джойн coach→user — app-level через шов
     return requests.map(toDto);
 };
@@ -109,10 +107,7 @@ const listCoachRequests = async (user, { status } = {}, club) => {
     // Изоляция по клубу (#7): если активный клуб определён — только его заявки
     if (club) filter.club = club;
     if (status) filter.status = status;
-    const requests = await CoachRequest.find(filter)
-        .sort({ createdAt: -1 })
-        .limit(200)
-        .lean();
+    const requests = await coachReqRepo.findMany(filter);
     await attachStudents(requests); // джойн student — app-level через шов
     const order = { pending: 0, approved: 1, rejected: 2 };
     return requests.sort((a, b) => order[a.status] - order[b.status]).map(toDto);
@@ -143,7 +138,7 @@ const resolveCourseForApproval = async (coachId) => {
  */
 const decideRequest = async (user, requestId, { status, courseId }) => {
     const coachId = await coachScope(user);
-    const request = await CoachRequest.findById(requestId).lean();
+    const request = await coachReqRepo.findById(requestId);
     if (request) await attachStudents(request); // джойн student — app-level через шов
     if (!request || (!isAdmin(user) && String(request.coach) !== String(coachId))) {
         throw notFound('Request not found.', 'REQUEST_NOT_FOUND');
@@ -161,11 +156,7 @@ const decideRequest = async (user, requestId, { status, courseId }) => {
     }
 
     // Условие на status — защита от параллельного решения той же заявки
-    const updated = await CoachRequest.findOneAndUpdate(
-        { _id: request._id, status: 'pending' },
-        { $set: { status, decidedAt: new Date(), enrollment } },
-        { new: true },
-    ).lean();
+    const updated = await coachReqRepo.updateIfPending(request._id, { status, decidedAt: new Date(), enrollment });
     if (!updated) throw conflict('This request has already been decided.', 'REQUEST_ALREADY_DECIDED');
     await attachStudents(updated); // джойн student — app-level через шов
 

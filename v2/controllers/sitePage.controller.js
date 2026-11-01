@@ -12,8 +12,8 @@
 // Запись (PUT/publish/DELETE) — только owner (см. site.routes requireOwner).
 
 const mongoose = require('mongoose');
-const Club = require('../models/Club');
-const ClubMembership = require('../models/ClubMembership');
+const clubRepo = require('../repositories/club.repo'); // шов tenant (mongo|pg по TENANT_DB)
+const membershipRepo = require('../repositories/clubMembership.repo'); // шов tenant
 const SitePage = require('../models/SitePage');
 const { sanitizeBlocks, starterPage } = require('../services/sitePage.service');
 
@@ -22,12 +22,12 @@ const { sanitizeBlocks, starterPage } = require('../services/sitePage.service');
 const resolvePublicClub = async (req) => {
     const slug = req.query.slug ? String(req.query.slug).toLowerCase().trim() : '';
     if (slug) {
-        return Club.findOne({ slug, status: 'active' }).select('name slug').lean();
+        return clubRepo.findActiveBySlug(slug);
     }
     const headerId = req.headers['x-club-id'];
     if (headerId && req.user && req.user.id && mongoose.Types.ObjectId.isValid(String(headerId))) {
-        const member = await ClubMembership.findOne({ club: headerId, user: req.user.id, status: 'active' }).lean();
-        if (member) return Club.findOne({ _id: headerId, status: 'active' }).select('name slug').lean();
+        const member = await membershipRepo.findActive(headerId, req.user.id);
+        if (member) return clubRepo.findActiveById(headerId);
     }
     return null;
 };
@@ -64,7 +64,7 @@ const getAdminPage = async (req, res) => {
     if (page) {
         return res.json({ data: { page, isNew: false } });
     }
-    const club = await Club.findById(req.club).select('name').lean();
+    const club = await clubRepo.findById(req.club);
     const starter = starterPage(slug, club && club.name);
     res.json({ data: { page: { slug, title: starter.title, blocks: starter.blocks, status: 'draft', version: 0 }, isNew: true } });
 };

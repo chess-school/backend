@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
 const { randomBytes, randomUUID } = require('crypto'); 
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
-const Player = require('../models/Player');
+const playerRepo = require('../repositories/player.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const { sendVerificationEmailV2 } = require('../utils/email/email.service'); 
 
 /**
@@ -41,8 +41,7 @@ const register = async (req, res) => {
         avatarUrl: defaultAvatarUrl,
     });
 
-    const player = new Player({ user: user._id });
-    await player.save();
+    await playerRepo.createForUser(user._id);
 
     await sendVerificationEmailV2(user.email, verificationToken, req.t);
 

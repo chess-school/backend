@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const puzzleBookRepo = require('../repositories/puzzleBook.repo'); // шов content (mongo|pg по CONTENT_DB)
 const puzzleAttemptRepo = require('../repositories/puzzleAttempt.repo'); // шов learning (mongo|pg по LEARNING_DB)
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
-const Group = require('../models/Group');
+const groupRepo = require('../repositories/group.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const { getTask, getReadyChapterFiles, loadChapterExercises } = require('../services/digitizer.service');
 const { parseMainline } = require('../utils/pgnMainline');
 const { syncBookPuzzles, syncExercisePuzzle, updateBookPuzzlesMeta } = require('../services/bookPuzzle.service');
@@ -43,7 +43,7 @@ const studentCanSeeBook = async (req, book) => {
         case 'private':
             return (book.allowedUsers || []).some((id) => String(id) === uid);
         case 'group': {
-            const groups = await Group.find({ members: req.user.id, _id: { $in: book.allowedGroups || [] } }).select('_id').lean();
+            const groups = await groupRepo.findByMember(req.user.id, { ids: book.allowedGroups || [] });
             return groups.length > 0;
         }
         default: // 'draft' или не задано — обратная совместимость
@@ -161,7 +161,7 @@ const getBooks = async (req, res) => {
     if (isStaff(req.user)) {
         access = { isStaff: true }; // тренеры и админы видят все задачники
     } else {
-        const groups = await Group.find({ members: req.user.id }).select('_id').lean();
+        const groups = await groupRepo.findByMember(req.user.id);
         access = { isStaff: false, userId: req.user.id, groupIds: groups.map((g) => g._id) };
     }
     // Изоляция по клубу (#7): если активный клуб определён — только его задачники

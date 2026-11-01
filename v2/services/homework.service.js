@@ -13,7 +13,7 @@ const assignmentRepo = require('../repositories/assignment.repo'); // шов lea
 const submissionRepo = require('../repositories/submission.repo'); // шов learning
 const scheduleRepo = require('../repositories/schedule.repo'); // шов learning
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
-const Group = require('../models/Group');
+const groupRepo = require('../repositories/group.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
 const { notify: emitNotification } = require('./notify');
@@ -47,7 +47,7 @@ const notify = ({ recipient, type, message, description, metadata }) =>
  *  Фильтр по этой аудитории строит шов assignment.repo (одинаково для mongo|pg). */
 const studentAudience = async (studentId) => {
     const [groupIds, courseIds] = await Promise.all([
-        Group.find({ members: studentId }).distinct('_id'),
+        groupRepo.memberGroupIds(studentId),
         contractRepo.distinct('course', { student: studentId, status: 'active' }),
     ]);
     return { studentId, groupIds, courseIds };
@@ -102,7 +102,7 @@ const createAssignment = async (user, payload, club) => {
     // Индивидуальное ДЗ — уведомляем студента; групповое — всех участников группы
     const recipients = contextType === 'student'
         ? [lesson.context.refId]
-        : contextType === 'group' ? (await Group.findById(lesson.context.refId).select('members').lean())?.members || [] : [];
+        : contextType === 'group' ? (await groupRepo.findById(lesson.context.refId))?.members || [] : [];
     await Promise.all(recipients.map((recipient) => notify({
         recipient,
         type: 'NEW_ASSIGNMENT',
@@ -148,7 +148,7 @@ const createPuzzleAssignment = async (user, payload, club) => {
     // Уведомляем адресатов: ссылка ведёт прямо на решение задачника
     const recipients = payload.contextType === 'student'
         ? [payload.contextRefId]
-        : (await Group.findById(payload.contextRefId).select('members').lean())?.members || [];
+        : (await groupRepo.findById(payload.contextRefId))?.members || [];
     await Promise.all(recipients.map((recipient) => notify({
         recipient,
         type: 'NEW_ASSIGNMENT',

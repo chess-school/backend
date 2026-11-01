@@ -17,7 +17,7 @@
 const mongoose = require('mongoose');
 const ContractMongo = require('../models/TrainingContract');
 const courseRepo = require('../repositories/course.repo'); // шов content (mongo|pg по CONTENT_DB)
-const Group = require('../models/Group');
+const groupRepo = require('./group.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const userRepo = require('./user.repo');
 const paymentRepo = require('./payment.repo');
 const coachRepo = require('./coach.repo');
@@ -228,7 +228,7 @@ async function attachGroups(contracts, fields) {
   const ids = [...new Set(contracts.map((c) => (c.group ? String(c.group) : null)).filter(Boolean))];
   const byId = new Map();
   if (ids.length) {
-    const docs = await Group.find({ _id: { $in: ids } }).select(fields.join(' ')).lean();
+    const docs = await groupRepo.findByIds(ids);
     for (const d of docs) byId.set(String(d._id), project(d, fields));
   }
   for (const c of contracts) c.group = c.group ? (byId.get(String(c.group)) || { _id: c.group }) : null;

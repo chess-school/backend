@@ -10,7 +10,7 @@
 // (скоуп-контроллеры сами требуют клуб через requireClub). Невалидный X-Club-Id с чужим клубом — 403.
 
 const mongoose = require('mongoose');
-const ClubMembership = require('../models/ClubMembership');
+const membershipRepo = require('../repositories/clubMembership.repo'); // шов tenant (mongo|pg по TENANT_DB)
 
 const resolveClubV2 = async (req, res, next) => {
     try {
@@ -21,7 +21,7 @@ const resolveClubV2 = async (req, res, next) => {
             if (!mongoose.Types.ObjectId.isValid(String(headerId))) {
                 return res.status(400).json({ msg: 'X-Club-Id must be a valid id.', code: 'INVALID_CLUB_ID' });
             }
-            const membership = await ClubMembership.findOne({ club: headerId, user: req.user.id, status: 'active' }).lean();
+            const membership = await membershipRepo.findActive(headerId, req.user.id);
             if (!membership) {
                 return res.status(403).json({ msg: 'You are not a member of this club.', code: 'NOT_CLUB_MEMBER' });
             }
@@ -32,7 +32,7 @@ const resolveClubV2 = async (req, res, next) => {
         }
 
         // Клуб по умолчанию: сначала где owner, затем любое активное членство
-        const memberships = await ClubMembership.find({ user: req.user.id, status: 'active' }).lean();
+        const memberships = await membershipRepo.findByUser(req.user.id, { status: 'active' });
         const chosen = memberships.find((m) => m.role === 'owner') || memberships[0] || null;
         req.club = chosen ? String(chosen.club) : null;
         req.clubRole = chosen ? chosen.role : null;

@@ -12,7 +12,6 @@
 //   — остальные — 403.
 
 const { AccessToken, TrackSource, WebhookReceiver } = require('livekit-server-sdk');
-const Group = require('../models/Group');
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const scheduleRepo = require('../repositories/schedule.repo'); // шов learning (mongo|pg по LEARNING_DB)
 const ClassroomSession = require('../models/ClassroomSession');

@@ -471,6 +471,166 @@ model PuzzleAttempt {
   @@map("puzzleattempts")
 }
 
+// --- Волна «tenant/coaching-остатки» (Club, ClubMembership, Group, Player, CoachApplication,
+//     CoachRequest) — ЕДИНЫЙ флаг TENANT_DB=mongo|pg (отдельный, т.к. USER_DB/COACHING_DB уже pg).
+//     Кросс-ссылки (ownerId/userId/coachId/clubId/memberIds/children/enrollmentId) — app-join через швы.
+//     Вложенное (limits/billing/botConfig/ratings/fideProfile) — колонки/Json. PK=ObjectId-строка.
+
+enum ClubPlan {
+  start
+  club
+  academy
+}
+
+enum ClubStatus {
+  active
+  suspended
+}
+
+enum MembershipRole {
+  owner
+  trainer
+  student
+  parent
+}
+
+enum MembershipStatus {
+  active
+  invited
+  removed
+}
+
+enum GroupStatus {
+  active
+  archived
+}
+
+enum ApplicationStatus {
+  pending
+  approved
+  rejected
+}
+
+model Club {
+  id      String     @id // Mongo ObjectId (hex)
+  name    String
+  slug    String     @unique
+  city    String?
+  logoUrl String?
+  brandPrimaryColor String @default("#2B50E0")
+  ownerId String // → users.id
+  plan    ClubPlan   @default(start)
+  status  ClubStatus @default(active)
+
+  // Лимиты тарифа (null = без лимита у academy)
+  limitsMaxStudents   Int?
+  limitsMaxTrainers   Int?
+  limitsMaxLessonSize Int?
+
+  // Биллинг Stripe
+  billingStripeCustomerId     String?
+  billingStripeSubscriptionId String?
+  billingCurrentPeriodEnd     DateTime?
+
+  botConfig Json? // { telegram:{enabled}, whatsapp:{enabled} }
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@map("clubs")
+}
+
+model ClubMembership {
+  id          String           @id // Mongo ObjectId (hex)
+  clubId      String // → clubs.id
+  userId      String // → users.id
+  role        MembershipRole
+  status      MembershipStatus @default(active)
+  childrenIds String[]         @default([]) // → users.id (дети для parent)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clubId, userId])
+  @@index([userId, status])
+  @@index([clubId, role, status])
+  @@map("clubmemberships")
+}
+
+model Group {
+  id          String      @id // Mongo ObjectId (hex)
+  clubId      String? // → clubs.id
+  name        String
+  description String?
+  coachId     String // → coaches.id
+  memberIds   String[]    @default([]) // → users.id
+  status      GroupStatus @default(active)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([coachId])
+  @@map("groups")
+}
+
+// v2 модель 'PlayerV2' (рейтинги быстрых партий, отдельно от User.ratings Glicko-2).
+model PlayerV2 {
+  id     String @id // Mongo ObjectId (hex)
+  userId String @unique // → users.id
+
+  ratings        Json? // { bullet:{rating,gamesPlayed}, blitz:{...}, rapid:{...}, classic:{...} }
+  statsTotalWins Int   @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("playerv2s")
+}
+
+model CoachApplication {
+  id              String            @id // Mongo ObjectId (hex)
+  clubId          String? // → clubs.id
+  applicantId     String // → users.id
+  headline        String            @default("")
+  motivation      String
+  experience      String            @default("")
+  specializations String[]          @default([])
+  contact         String            @default("")
+  fideProfile     Json? // { fideId, title, rating:{standard,rapid,blitz}, profileUrl }
+  sourceLang      String            @default("en")
+  status          ApplicationStatus @default(pending)
+  adminNote       String            @default("")
+  decidedAt       DateTime?
+  decidedById     String? // → users.id
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([applicantId])
+  @@map("coachapplications")
+}
+
+model CoachRequest {
+  id           String            @id // Mongo ObjectId (hex)
+  clubId       String? // → clubs.id
+  studentId    String // → users.id
+  coachId      String // → coaches.id
+  experience   String // Beginner|Intermediate|Advanced
+  goals        String            @default("")
+  status       ApplicationStatus @default(pending)
+  decidedAt    DateTime?
+  enrollmentId String? // → trainingcontracts.id
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([coachId, status, createdAt])
+  @@index([studentId, coachId])
+  @@map("coachrequests")
+}
+
 // Расписание занятий (v2 модель 'ScheduleV2', коллекция schedulev2).
 model ScheduleV2 {
   id              String         @id // Mongo ObjectId (hex)

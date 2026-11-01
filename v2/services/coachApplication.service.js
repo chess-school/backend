@@ -8,7 +8,7 @@
 
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
-const CoachApplication = require('../models/CoachApplication');
+const coachAppRepo = require('../repositories/coachApplication.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const { notify: emitNotification } = require('./notify');
 const { conflict, forbidden, notFound } = require('../utils/apiError');
 
@@ -49,14 +49,14 @@ const submit = async (user, payload, club) => {
     if ((current.roles || []).includes('COACH')) {
         throw conflict('You are already a coach.', 'ALREADY_COACH');
     }
-    if (await CoachApplication.exists({ applicant: user.id, status: 'pending' })) {
+    if (await coachAppRepo.existsPending(user.id)) {
         throw conflict('You already have a pending application.', 'APPLICATION_PENDING');
     }
 
     const sourceLang = SUPPORTED_LANGS.includes(payload.sourceLang) ? payload.sourceLang : 'en';
     let application;
     try {
-        application = await CoachApplication.create({
+        application = await coachAppRepo.create({
             applicant: user.id,
             headline: payload.headline || '',
             motivation: payload.motivation,
@@ -78,12 +78,12 @@ const submit = async (user, payload, club) => {
     const who = `${applicant?.firstName ?? ''} ${applicant?.lastName ?? ''}`.trim() || 'A user';
     await Promise.all(admins.map((a) => notify(a._id, 'COACH_APPLICATION', `${who} applied to become a coach`, '/coach-applications')));
 
-    return toDto(application.toObject());
+    return toDto(application);
 };
 
 /** Последняя заявка текущего пользователя (или null) */
 const getMine = async (user) => {
-    const application = await CoachApplication.findOne({ applicant: user.id }).sort({ createdAt: -1 }).lean();
+    const application = await coachAppRepo.findLatestByApplicant(user.id);
     return application ? toDto(application) : null;
 };
 
@@ -91,12 +91,7 @@ const getMine = async (user) => {
 const list = async (user, { status } = {}, club) => {
     if (!(user.roles || []).includes('ADMIN')) throw forbidden();
     // Изоляция по клубу (#7): если активный клуб определён — только его заявки
-    const filter = { ...(club ? { club } : {}) };
-    if (status) filter.status = status;
-    const applications = await CoachApplication.find(filter)
-        .sort({ createdAt: -1 })
-        .limit(300)
-        .lean();
+    const applications = await coachAppRepo.findMany({ ...(club ? { club } : {}), ...(status ? { status } : {}) });
     // джойн applicant — app-level через шов (замена populate('applicant', PUBLIC_USER))
     const map = await userRepo.userCardMap(applications.map((a) => a.applicant), ['uuid', 'firstName', 'lastName', 'avatarUrl', 'email', 'phone']);
     for (const a of applications) a.applicant = a.applicant ? (map.get(String(a.applicant)) || null) : null;
@@ -128,7 +123,7 @@ const seedFields = (application) => {
 const decide = async (user, applicationId, { status, adminNote }) => {
     if (!(user.roles || []).includes('ADMIN')) throw forbidden();
 
-    const application = await CoachApplication.findById(applicationId);
+    const application = await coachAppRepo.findById(applicationId);
     if (!application) throw notFound('Application not found.', 'APPLICATION_NOT_FOUND');
     if (application.status !== 'pending') throw conflict('This application has already been decided.', 'APPLICATION_ALREADY_DECIDED');
 
@@ -143,11 +138,9 @@ const decide = async (user, applicationId, { status, adminNote }) => {
         await coachRepo.upsertByUser(applicant._id, { set: { ...seedFields(application), isVerified: true } });
     }
 
-    application.status = status;
-    application.adminNote = adminNote || '';
-    application.decidedAt = new Date();
-    application.decidedBy = user.id;
-    await application.save();
+    const updated = await coachAppRepo.updateById(applicationId, {
+        status, adminNote: adminNote || '', decidedAt: new Date(), decidedBy: user.id,
+    });
 
     await notify(
         application.applicant, 'COACH_APPLICATION_DECIDED',
@@ -157,7 +150,7 @@ const decide = async (user, applicationId, { status, adminNote }) => {
         '/coaches',
     );
 
-    return toDto(application.toObject());
+    return toDto(updated);
 };
 
 module.exports = { submit, getMine, list, decide };

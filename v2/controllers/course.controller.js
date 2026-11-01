@@ -2,7 +2,7 @@
 
 const courseRepo = require('../repositories/course.repo'); // шов content (mongo|pg по CONTENT_DB)
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
-const Group = require('../models/Group');
+const groupRepo = require('../repositories/group.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const mongoose = require('mongoose');
 
 const VISIBILITIES = ['draft', 'private', 'group', 'public'];
@@ -33,7 +33,7 @@ async function buildAccess(req) {
     // Ученик (USER) / гость: + allowedUsers + групповые
     let groupIds = [];
     if (userId) {
-        const groups = await Group.find({ members: userId }).select('_id').lean();
+        const groups = await groupRepo.findByMember(userId);
         groupIds = groups.map((g) => String(g._id));
     }
     return { isAdmin: false, userId, coachId: null, groupIds };

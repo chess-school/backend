@@ -1,4 +1,4 @@
-const Group = require('../models/Group');
+const groupRepo = require('../repositories/group.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const contractRepo = require('../repositories/trainingContract.repo'); // шов coaching
@@ -31,14 +31,12 @@ const createGroup = async (req, res) => {
     }
 
     // 2. Создаем группу (в активном клубе — мульти-арендность #7)
-    const group = new Group({
+    const group = await groupRepo.create({
         name,
         description,
         coach: coachProfile._id, // Текущий тренер - владелец группы
         ...(req.club ? { club: req.club } : {}),
     });
-
-    await group.save();
     res.status(201).json(group);
 };
 
@@ -56,7 +54,7 @@ const getMyGroups = async (req, res) => {
 
     // Изоляция по клубу (#7): если активный клуб определён — только его группы
     const filter = { coach: coachProfile._id, ...(req.club ? { club: req.club } : {}) };
-    const groups = await Group.find(filter).sort({ createdAt: -1 }).lean();
+    const groups = await groupRepo.findMany(filter);
     await attachMembers(groups); // джойн участников — app-level через шов
 
     res.json({ data: groups });
@@ -72,7 +70,7 @@ const getGroupById = async (req, res) => {
     const { groupId } = req.params;
 
     // Некорректный groupId -> CastError -> 400 (errorHandlerV2)
-    const group = await Group.findById(groupId).lean();
+    const group = await groupRepo.findById(groupId);
 
     if (!group) {
         return res.status(404).json({ msg: 'Group not found.', code: 'GROUP_NOT_FOUND' });
@@ -101,7 +99,7 @@ const loadOwnGroup = async (req, res, groupId) => {
         res.status(403).json({ msg: 'Coach profile not found for the current user.', code: 'COACH_PROFILE_REQUIRED' });
         return {};
     }
-    const group = await Group.findById(groupId);
+    const group = await groupRepo.findById(groupId);
     if (!group || String(group.coach) !== String(coachProfile._id)) {
         res.status(404).json({ msg: 'Group not found or you are not its owner.', code: 'GROUP_NOT_FOUND' });
         return {};
@@ -141,10 +139,7 @@ const addMemberToGroup = async (req, res) => {
 
     // Атомарно: условие members $ne в фильтре + $addToSet — параллельные запросы не создадут дубль.
     // Проверяем matchedCount, а не modifiedCount: из-за timestamps Mongoose всегда меняет updatedAt
-    const result = await Group.updateOne(
-        { _id: group._id, members: { $ne: studentToAdd._id } },
-        { $addToSet: { members: studentToAdd._id } }
-    );
+    const result = await groupRepo.addMember(group._id, studentToAdd._id);
     if (result.matchedCount === 0) {
         return res.status(409).json({ msg: 'This student is already a member of this group.', code: 'ALREADY_MEMBER' });
     }
@@ -155,7 +150,7 @@ const addMemberToGroup = async (req, res) => {
     await contractRepo.updateOne({ _id: contract._id }, { group: group._id });
     if (previousGroup && String(previousGroup) !== String(group._id)) {
         const stillLinked = await contractRepo.exists({ student: studentToAdd._id, group: previousGroup });
-        if (!stillLinked) await Group.updateOne({ _id: previousGroup }, { $pull: { members: studentToAdd._id } });
+        if (!stillLinked) await groupRepo.removeMember(previousGroup, studentToAdd._id);
     }
 
     // Чекпоинт: ученик узнаёт, что его добавили в группу
@@ -186,10 +181,7 @@ const removeMemberFromGroup = async (req, res) => {
         return res.status(404).json({ msg: 'Student with this UUID not found.', code: 'STUDENT_NOT_FOUND' });
     }
 
-    const result = await Group.updateOne(
-        { _id: group._id, members: studentToRemove._id },
-        { $pull: { members: studentToRemove._id } }
-    );
+    const result = await groupRepo.removeMember(group._id, studentToRemove._id);
     if (result.matchedCount === 0) {
         return res.status(404).json({ msg: 'This student is not a member of this group.', code: 'NOT_A_MEMBER' });
     }

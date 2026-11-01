@@ -14,7 +14,7 @@
 const mongoose = require('mongoose');
 const clubRepo = require('../repositories/club.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const membershipRepo = require('../repositories/clubMembership.repo'); // шов tenant
-const SitePage = require('../models/SitePage');
+const sitePageRepo = require('../repositories/sitePage.repo'); // шов misc (mongo|pg по MISC_DB)
 const { sanitizeBlocks, starterPage } = require('../services/sitePage.service');
 
 // Клуб публичного запроса: ?slug=<clubSlug> (витрина) либо X-Club-Id активного пользователя.
@@ -38,8 +38,7 @@ const pageSlug = (req) => String(req.params.slug || '').toLowerCase().trim().sli
 const getPublicPage = async (req, res) => {
     const club = await resolvePublicClub(req);
     if (!club) return next404(res);
-    const page = await SitePage.findOne({ club: club._id, slug: pageSlug(req), status: 'published' })
-        .select('slug title blocks version updatedAt').lean();
+    const page = await sitePageRepo.findPublished(club._id, pageSlug(req));
     if (!page) return next404(res);
     res.json({ data: { slug: page.slug, title: page.title, blocks: page.blocks || [], version: page.version } });
 };
@@ -50,17 +49,14 @@ const next404 = (res) => res.status(404).json({ msg: 'Page not found.', code: 'P
 
 /** @route GET /api/v2/site/pages — список страниц активного клуба (мета, без тел блоков). */
 const listPages = async (req, res) => {
-    const pages = await SitePage.find({ club: req.club })
-        .select('slug title status version updatedAt updatedBy')
-        .sort({ updatedAt: -1 })
-        .lean();
+    const pages = await sitePageRepo.listByClub(req.club);
     res.json({ data: pages.map((p) => ({ ...p, blockCount: undefined })) });
 };
 
 /** @route GET /api/v2/site/pages/admin/:slug — черновик для редактора; нет — стартовый шаблон. */
 const getAdminPage = async (req, res) => {
     const slug = pageSlug(req);
-    const page = await SitePage.findOne({ club: req.club, slug }).lean();
+    const page = await sitePageRepo.findByClubSlug(req.club, slug);
     if (page) {
         return res.json({ data: { page, isNew: false } });
     }
@@ -78,25 +74,17 @@ const savePage = async (req, res) => {
     const title = typeof b.title === 'string' ? b.title.trim().slice(0, 160) : '';
 
     // version инкрементим атомарно; редактирование уводит страницу в черновик (публикация — отдельно).
-    const existing = await SitePage.findOne({ club: req.club, slug }).select('version').lean();
-    const version = (existing ? existing.version : 0) + 1;
+    const existingVersion = await sitePageRepo.getVersion(req.club, slug);
+    const version = (existingVersion || 0) + 1;
 
-    const page = await SitePage.findOneAndUpdate(
-        { club: req.club, slug },
-        { $set: { club: req.club, slug, title, blocks, status: 'draft', version, updatedBy: req.user.id } },
-        { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true },
-    ).lean();
+    const page = await sitePageRepo.upsertDraft(req.club, slug, { title, blocks, version, updatedBy: req.user.id });
     res.json({ data: { page } });
 };
 
 /** @route POST /api/v2/site/pages/:slug/publish — опубликовать страницу. */
 const publishPage = async (req, res) => {
     const slug = pageSlug(req);
-    const page = await SitePage.findOneAndUpdate(
-        { club: req.club, slug },
-        { $set: { status: 'published', updatedBy: req.user.id } },
-        { new: true },
-    ).lean();
+    const page = await sitePageRepo.publish(req.club, slug, req.user.id);
     if (!page) return next404(res);
     res.json({ data: { page } });
 };
@@ -104,8 +92,8 @@ const publishPage = async (req, res) => {
 /** @route DELETE /api/v2/site/pages/:slug — удалить страницу активного клуба. */
 const deletePage = async (req, res) => {
     const slug = pageSlug(req);
-    const r = await SitePage.deleteOne({ club: req.club, slug });
-    if (!r.deletedCount) return next404(res);
+    const ok = await sitePageRepo.deleteByClubSlug(req.club, slug);
+    if (!ok) return next404(res);
     res.json({ data: { deleted: true } });
 };
 

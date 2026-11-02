@@ -122,9 +122,35 @@ const getAvatarByUuid = async (req, res) => {
 };
 
 
+/**
+ * @desc    Публичный профиль пользователя по UUID (для просмотра чужого профиля —
+ *          напр. тренер смотрит ученика, страница клуба). Только НЕсекретные поля:
+ *          email/phone/emailVerified НЕ отдаём третьим лицам.
+ * @route   GET /api/v2/users/:uuid
+ * @access  Private (любой авторизованный)
+ */
+const getPublicProfileByUuid = async (req, res) => {
+    const { uuid } = req.params;
+    const user = await userRepo.findByUuid(uuid);
+    if (!user) {
+        return res.status(404).json({ msg: 'User not found.' });
+    }
+    res.json({
+        uuid: user.uuid,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        avatarUrl: user.avatarUrl,
+        roles: user.roles,
+        ratings: user.ratings,
+        createdAt: user.createdAt,
+    });
+};
+
+
 module.exports = {
     getMyProfile,
     updateMyProfile,
     updateMyAvatar,
-    getAvatarByUuid
+    getAvatarByUuid,
+    getPublicProfileByUuid
 };

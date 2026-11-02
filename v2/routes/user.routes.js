@@ -81,4 +81,16 @@ router.get(
     userController.getAvatarByUuid
 );
 
+/**
+ * @route   GET /api/v2/users/:uuid
+ * @desc    Публичный профиль пользователя по UUID (просмотр чужого профиля)
+ * @access  Private
+ */
+router.get(
+    '/:uuid',
+    authMiddleware,
+    validateRequest('uuid'),
+    userController.getPublicProfileByUuid
+);
+
 module.exports = withErrorHandling(router);

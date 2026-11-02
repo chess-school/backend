@@ -70,6 +70,12 @@ async function findActiveBySlug(slug) {
   return ClubMongo.findOne({ slug: String(slug).toLowerCase(), status: 'active' }).lean();
 }
 
+// findOne({ slug }) — ЛЮБОЙ статус (превью suspended-клуба владельцу/участнику).
+async function findBySlug(slug) {
+  if (usePg()) return pgRowToDoc(await prisma().club.findUnique({ where: { slug: String(slug).toLowerCase() } })) || null;
+  return ClubMongo.findOne({ slug: String(slug).toLowerCase() }).lean();
+}
+
 // findOne({ _id, status:'active' }).
 async function findActiveById(id) {
   if (usePg()) return pgRowToDoc(await prisma().club.findFirst({ where: { id: String(id), status: 'active' } })) || null;
@@ -106,6 +112,6 @@ async function updateById(id, patch = {}) {
 }
 
 module.exports = {
-  findById, findActiveBySlug, findActiveById, existsBySlug, create, updateById,
+  findById, findActiveBySlug, findBySlug, findActiveById, existsBySlug, create, updateById,
   limitsForPlan, PLAN_LIMITS, usePg, _pgRowToDoc: pgRowToDoc,
 };

@@ -113,8 +113,19 @@ const getOverview = async (req, res) => {
  *  Отдаёт только безопасные публичные поля + (если залогинен) членство пользователя. */
 const getBySlug = async (req, res) => {
     const slug = String(req.params.slug || '').toLowerCase();
-    const club = await clubRepo.findActiveBySlug(slug);
+    // Берём клуб ЛЮБОГО статуса: suspended-клуб показываем как превью владельцу/участнику,
+    // чужим/анонимам — 404 (как будто не опубликован).
+    const club = await clubRepo.findBySlug(slug);
     if (!club) throw notFound('Club not found.', 'CLUB_NOT_FOUND');
+
+    let membershipDoc = null;
+    if (req.user && req.user.id) {
+        membershipDoc = await membershipRepo.findActive(club._id, req.user.id);
+    }
+    const published = club.status === 'active';
+    const isOwner = !!(req.user && req.user.id && String(club.owner) === String(req.user.id));
+    const canPreview = isOwner || !!membershipDoc;
+    if (!published && !canPreview) throw notFound('Club not found.', 'CLUB_NOT_FOUND');
 
     // Публичная витрина: тренеры клуба (верхнеуровнево) и число групп
     const [coachesRaw, groupsCount] = await Promise.all([
@@ -127,13 +138,9 @@ const getBySlug = async (req, res) => {
         title: c.fideProfile && c.fideProfile.title ? c.fideProfile.title : null,
     }));
 
-    let membership = null;
-    if (req.user && req.user.id) {
-        const m = await membershipRepo.findActive(club._id, req.user.id);
-        if (m) membership = { role: m.role, status: m.status };
-    }
+    const membership = membershipDoc ? { role: membershipDoc.role, status: membershipDoc.status } : null;
 
-    res.json({ data: { club, coaches, groupsCount, membership } });
+    res.json({ data: { club, coaches, groupsCount, membership, published } });
 };
 
 module.exports = { getMyClubs, createClub, getClub, getOverview, getBySlug };

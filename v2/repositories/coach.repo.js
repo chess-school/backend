@@ -40,6 +40,7 @@ const pgRowToDoc = (r) => r && {
   specializations: r.specializations ?? undefined,
   fideProfile: r.fideProfile ?? undefined,
   isVerified: r.isVerified,
+  showOnSite: r.showOnSite,
   platformRating: { average: r.platformRatingAverage, count: r.platformRatingCount },
   payoutInfo: r.payoutInfo ?? undefined,
   createdAt: r.createdAt,
@@ -63,7 +64,7 @@ async function attachUsers(coaches) {
 }
 
 // --- Поля localized/прочие для PG-записи (undefined-поля не трогаем) ---
-const COACH_SETTABLE = ['headline', 'bio', 'specializations', 'fideProfile', 'isVerified', 'platformRating', 'payoutInfo', 'club'];
+const COACH_SETTABLE = ['headline', 'bio', 'specializations', 'fideProfile', 'isVerified', 'showOnSite', 'platformRating', 'payoutInfo', 'club'];
 const pgSetData = (set) => {
   const d = {};
   for (const k of Object.keys(set || {})) {
@@ -221,13 +222,14 @@ async function countCatalog({ isVerified, clubId, userIds } = {}) {
 }
 
 // Тренеры клуба с подставленным user (club.controller, публичная витрина).
+// Только видимые на сайте (showOnSite !== false; старые записи без поля считаем видимыми).
 async function findByClubWithUser(clubId, limit = 12) {
   let coaches;
   if (usePg()) {
-    const rows = await prisma().coach.findMany({ where: { clubId: String(clubId) }, take: limit });
+    const rows = await prisma().coach.findMany({ where: { clubId: String(clubId), showOnSite: { not: false } }, take: limit });
     coaches = rows.map(pgRowToDoc);
   } else {
-    coaches = await CoachMongo.find({ club: clubId }).limit(limit).lean();
+    coaches = await CoachMongo.find({ club: clubId, showOnSite: { $ne: false } }).limit(limit).lean();
   }
   await attachUsers(coaches);
   return coaches;

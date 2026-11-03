@@ -182,6 +182,7 @@ model Coach {
   fideProfile     Json? // { fideId, title, rating:{standard,rapid,blitz}, profileUrl }
 
   isVerified Boolean @default(false)
+  showOnSite Boolean @default(true) // показывать карточку на публичном сайте клуба
 
   // platformRating.average вынесен в КОЛОНКУ — по нему ORDER BY в каталоге тренеров.
   platformRatingAverage Float @default(0)

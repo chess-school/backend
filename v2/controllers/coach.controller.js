@@ -19,16 +19,17 @@ const SUPPORTED_LANGS = ['en', 'uk', 'pl'];
  * @access  Private (role: COACH)
  */
 const upsertMyCoachProfile = async (req, res) => {
-    const { headline, bio, specializations, fideProfile, sourceLang } = req.body;
+    const { headline, bio, specializations, fideProfile, sourceLang, showOnSite } = req.body;
     const userId = req.user.id;
 
     const finalSourceLang = (sourceLang && SUPPORTED_LANGS.includes(sourceLang)) ? sourceLang : 'en';
     const targetLangs = SUPPORTED_LANGS.filter(lang => lang !== finalSourceLang);
-    
+
     console.log(`Upserting profile for user ${userId}. Source lang: ${finalSourceLang}, target: ${targetLangs.join(', ')}`);
 
     const coachProfileFields = {};
     if (fideProfile) coachProfileFields.fideProfile = fideProfile;
+    if (typeof showOnSite === 'boolean') coachProfileFields.showOnSite = showOnSite;
 
     try {
         if (headline) {

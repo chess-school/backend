@@ -315,6 +315,7 @@ model SiteSettings {
   footer  Json? // { text, legalName, links:[{label,url}] }
   socials Json? // { facebook, instagram, twitter, youtube, telegram }
   menu    Json? // [{ key, label, path, hidden, order }]
+  theme   Json? // { mode: 'light'|'dark' } — тема публичного сайта клуба (выбирает владелец)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

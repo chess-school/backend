@@ -22,6 +22,7 @@ const PLATFORM_DEFAULTS = {
     footer: { text: '', legalName: 'debiut', links: [] },
     socials: {},
     menu: [],
+    theme: { mode: 'light' },
 };
 
 // Чистим соцсети от пустых значений, чтобы фронт не рисовал «пустые» иконки.
@@ -70,6 +71,7 @@ const buildPublic = (club, s) => {
             .filter((m) => m && !m.hidden && m.label && m.path)
             .sort((a, b) => (a.order || 0) - (b.order || 0))
             .map((m) => ({ key: m.key || m.path, label: m.label, path: m.path })),
+        theme: { mode: (s && s.theme?.mode === 'dark') ? 'dark' : 'light' },
     };
 };
 
@@ -151,6 +153,9 @@ const updateSettings = async (req, res) => {
         for (const k of SOCIAL_KEYS) {
             if (b.socials[k] !== undefined) patch.socials[k] = str(b.socials[k], 300) || '';
         }
+    }
+    if (b.theme && typeof b.theme === 'object' && b.theme.mode !== undefined) {
+        patch.theme = { mode: b.theme.mode === 'dark' ? 'dark' : 'light' };
     }
 
     const settings = await siteSettingsRepo.upsertByClub(req.club, patch);

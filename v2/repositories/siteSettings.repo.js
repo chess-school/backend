@@ -24,6 +24,7 @@ const pgRowToDoc = (r) => r && ({
   footer: r.footer ?? undefined,
   socials: r.socials ?? undefined,
   menu: r.menu ?? undefined,
+  theme: r.theme ?? undefined,
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
 });
@@ -53,6 +54,7 @@ async function upsertByClub(clubId, patch) {
       footer: patch.footer ? mergeObj(cur?.footer, patch.footer) : cur?.footer ?? undefined,
       socials: patch.socials ? mergeObj(cur?.socials, patch.socials) : cur?.socials ?? undefined,
       menu: patch.menu !== undefined ? patch.menu : cur?.menu ?? undefined,
+      theme: patch.theme ? mergeObj(cur?.theme, patch.theme) : cur?.theme ?? undefined,
     };
     const row = cur
       ? await prisma().siteSettings.update({ where: { clubId: String(clubId) }, data: next })
@@ -62,7 +64,7 @@ async function upsertByClub(clubId, patch) {
   // mongo: вложенный патч → dotted $set, чтобы не затирать соседние подполя auth/footer/socials.
   const set = { club: clubId };
   for (const k of ['siteName', 'logoUrl', 'tagline', 'menu']) if (patch[k] !== undefined) set[k] = patch[k];
-  for (const parent of ['auth', 'footer', 'socials']) {
+  for (const parent of ['auth', 'footer', 'socials', 'theme']) {
     if (patch[parent]) for (const [k, v] of Object.entries(patch[parent])) set[`${parent}.${k}`] = v;
   }
   return SiteSettingsMongo.findOneAndUpdate(

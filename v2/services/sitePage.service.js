@@ -97,6 +97,15 @@ const BLOCK_TYPES = {
         if (!items.length) return null;
         return { items };
     },
+    slider: (p) => {
+        const items = (Array.isArray(p.items) ? p.items : [])
+            .map(cleanImage)
+            .filter((i) => i.assetId || i.url)
+            .slice(0, 12);
+        if (!items.length) return null;
+        const n = Number(p.interval);
+        return { items, interval: n >= 2 && n <= 15 ? Math.floor(n) : 5 };  // сек между слайдами
+    },
     banner: (p) => ({
         bg: cleanImage(p.bg || {}),
         bgColor: safeColor(p.bgColor),

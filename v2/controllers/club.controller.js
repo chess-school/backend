@@ -136,16 +136,29 @@ const getBySlug = async (req, res) => {
     const lang = req.language || 'en';
     const pickL = (loc) => (loc ? (loc[lang] || loc.en || Object.values(loc).find((v) => typeof v === 'string' && v) || '') : '');
     const pickArr = (loc) => (loc ? (loc[lang] || loc.en || Object.values(loc).find((v) => Array.isArray(v) && v.length) || []) : []);
-    const coaches = coachesRaw.map((c) => ({
-        uuid: c.user ? c.user.uuid : null,
-        name: c.user ? `${c.user.firstName || ''} ${c.user.lastName || ''}`.trim() : '—',
-        headline: pickL(c.headline),
-        // Титул показываем ТОЛЬКО у подтверждённого профиля (ТЗ: titleVerified).
-        title: (c.isVerified && c.fideProfile && c.fideProfile.title && c.fideProfile.title !== 'None') ? c.fideProfile.title : null,
-        photoUrl: c.user ? (c.user.avatarUrl || null) : null,
-        bio: pickL(c.bio),
-        tags: (pickArr(c.specializations) || []).filter(Boolean).slice(0, 3),
-    }));
+    // Минимальная «заполненность» профиля для показа на сайте — прячет пустые/тестовые карточки
+    // («yes», «test», «пипип» и т.п.) без удаления данных. Полный чек-лист (фото/имя) — в редакторе профиля.
+    const MIN_BIO = 40;
+    const seen = new Set();
+    const coaches = coachesRaw
+        .map((c) => ({
+            uuid: c.user ? c.user.uuid : null,
+            name: c.user ? `${c.user.firstName || ''} ${c.user.lastName || ''}`.trim() : '—',
+            headline: pickL(c.headline),
+            // Титул показываем ТОЛЬКО у подтверждённого профиля (ТЗ: titleVerified).
+            title: (c.isVerified && c.fideProfile && c.fideProfile.title && c.fideProfile.title !== 'None') ? c.fideProfile.title : null,
+            photoUrl: c.user ? (c.user.avatarUrl || null) : null,
+            bio: pickL(c.bio),
+            tags: (pickArr(c.specializations) || []).filter(Boolean).slice(0, 3),
+        }))
+        // Заполнен: есть имя, headline и содержательное bio. Дедуп по пользователю (uuid).
+        .filter((c) => {
+            if (!c.name || c.name === '—' || !c.headline || (c.bio || '').length < MIN_BIO) return false;
+            const key = c.uuid || `${c.name}|${c.headline}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
 
     const membership = membershipDoc ? { role: membershipDoc.role, status: membershipDoc.status } : null;
 

@@ -6,6 +6,7 @@ const groupRepo = require('../repositories/group.repo'); // шов tenant
 const scheduleRepo = require('../repositories/schedule.repo'); // шов learning (mongo|pg по LEARNING_DB)
 const paymentRepo = require('../repositories/payment.repo');
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
+const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const { notFound } = require('../utils/apiError');
 
 const coachName = (coach) => {
@@ -165,4 +166,49 @@ const getBySlug = async (req, res) => {
     res.json({ data: { club, coaches, groupsCount, membership, published } });
 };
 
-module.exports = { getMyClubs, createClub, getClub, getOverview, getBySlug };
+/** @route GET /api/v2/clubs/by-slug/:slug/coaches/:uuid — ПУБЛИЧНЫЙ профиль одного тренера клуба.
+ *  Тренер должен принадлежать ИМЕННО этому клубу и быть видимым (чужой/скрытый → 404). */
+const getBySlugCoach = async (req, res) => {
+    const slug = String(req.params.slug || '').toLowerCase();
+    const club = await clubRepo.findBySlug(slug);
+    if (!club) throw notFound('Coach not found.', 'COACH_NOT_FOUND');
+
+    // Suspended-клуб виден только владельцу/участнику (как в getBySlug).
+    let membershipDoc = null;
+    if (req.user && req.user.id) membershipDoc = await membershipRepo.findActive(club._id, req.user.id);
+    const isOwner = !!(req.user && req.user.id && String(club.owner) === String(req.user.id));
+    if (club.status !== 'active' && !isOwner && !membershipDoc) throw notFound('Coach not found.', 'COACH_NOT_FOUND');
+
+    const user = await userRepo.findByUuid(String(req.params.uuid || ''));
+    if (!user) throw notFound('Coach not found.', 'COACH_NOT_FOUND');
+    const coach = await coachRepo.findByUser(user._id);
+    if (!coach || String(coach.club) !== String(club._id) || coach.showOnSite === false) {
+        throw notFound('Coach not found.', 'COACH_NOT_FOUND');
+    }
+
+    const lang = req.language || 'en';
+    const pickL = (loc) => (loc ? (loc[lang] || loc.en || Object.values(loc).find((v) => typeof v === 'string' && v) || '') : '');
+    const pickArr = (loc) => (loc ? (loc[lang] || loc.en || Object.values(loc).find((v) => Array.isArray(v) && v.length) || []) : []);
+    const verified = !!coach.isVerified;
+    const fide = coach.fideProfile || {};
+    const hasRating = fide.rating && (fide.rating.standard || fide.rating.rapid || fide.rating.blitz);
+
+    res.json({
+        data: {
+            club: { name: club.name, slug: club.slug, city: club.city || '', primaryColor: (club.brand && club.brand.primaryColor) || null, logoUrl: club.logoUrl || null, theme: undefined },
+            coach: {
+                uuid: user.uuid,
+                name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+                photoUrl: user.avatarUrl || null,
+                headline: pickL(coach.headline),
+                bio: pickL(coach.bio),
+                tags: (pickArr(coach.specializations) || []).filter(Boolean),
+                // Титул/рейтинг — только у подтверждённого профиля (ТЗ).
+                title: (verified && fide.title && fide.title !== 'None') ? fide.title : null,
+                rating: (verified && hasRating) ? fide.rating : null,
+            },
+        },
+    });
+};
+
+module.exports = { getMyClubs, createClub, getClub, getOverview, getBySlug, getBySlugCoach };

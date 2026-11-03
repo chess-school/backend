@@ -924,6 +924,44 @@ model MediaBlob {
   @@map("mediablobs")
 }
 
+// Заявка на пробное занятие с публичного сайта клуба (debiut, этап Leads).
+model Lead {
+  id            String     @id // Mongo ObjectId (hex)
+  clubId        String
+  source        String     @default("site") // site | manual
+  pagePath      String?
+  who           String     @default("self") // self | child
+  name          String
+  childAge      Int?
+  email         String?
+  phone         String?
+  level         String? // new | rules | tournaments
+  format        String? // offline | online
+  preferredTime String?
+  coachId       String? // Coach.id (если пришли с профиля тренера)
+  groupId       String?
+  status        LeadStatus @default(new)
+  lostReason    String?
+  assigneeId    String?
+  note          String?
+  consentAt     DateTime?
+  consentIp     String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@index([clubId, status, createdAt])
+  @@map("leads")
+}
+
+enum LeadStatus {
+  new
+  contacted
+  trial_scheduled
+  trial_done
+  converted
+  lost
+}
+
 model SitePage {
   id          String         @id
   clubId      String

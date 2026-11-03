@@ -8,11 +8,14 @@ const optionalAuth = require('../middleware/optionalAuthV2.middleware');
 const resolveClub = require('../middleware/resolveClubV2.middleware');
 const validate = require('../middleware/validate');
 const clubController = require('../controllers/club.controller');
+const leadsController = require('../controllers/leads.controller');
 
 // Публичная витрина клуба для сайта /c/<slug> (бренд + тренеры + членство, если залогинен)
 router.get('/by-slug/:slug', optionalAuth, clubController.getBySlug);
 // Публичный профиль одного тренера клуба (страница /c/<slug>/coaches/<uuid>)
 router.get('/by-slug/:slug/coaches/:uuid', optionalAuth, clubController.getBySlugCoach);
+// ПУБЛИЧНАЯ заявка на пробное с сайта клуба (антиспам внутри контроллера)
+router.post('/by-slug/:slug/leads', leadsController.createPublic);
 
 // Клубы текущего пользователя (переключатель клуба)
 router.get('/mine', authMiddleware, clubController.getMyClubs);

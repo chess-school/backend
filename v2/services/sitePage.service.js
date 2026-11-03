@@ -106,6 +106,18 @@ const BLOCK_TYPES = {
         const n = Number(p.interval);
         return { items, interval: n >= 2 && n <= 15 ? Math.floor(n) : 5 };  // сек между слайдами
     },
+    // Блок «Тренеры»: НЕ хранит сами данные — только настройки. Список тренеров подставляется
+    // вживую при рендере из витрины клуба (с фильтром качества и showOnSite).
+    coaches: (p) => {
+        const LAYOUTS = ['grid', 'list'];
+        const LIMITS = [3, 6, 9];
+        return {
+            title: cleanI18n(p.title, 60),
+            subtitle: cleanI18n(p.subtitle, 160),
+            layout: LAYOUTS.includes(p.layout) ? p.layout : 'grid',
+            limit: LIMITS.includes(Number(p.limit)) ? Number(p.limit) : 0,   // 0 = все
+        };
+    },
     banner: (p) => ({
         bg: cleanImage(p.bg || {}),
         bgColor: safeColor(p.bgColor),

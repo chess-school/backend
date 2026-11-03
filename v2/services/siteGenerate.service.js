@@ -12,12 +12,14 @@ const CLAUDE_TIMEOUT = Number(process.env.SITE_GEN_TIMEOUT_MS || 180000); // 3 �
 const LANG_NAME = { pl: 'Polish', uk: 'Ukrainian', en: 'English' };
 
 // Строгий промпт: Claude возвращает ТОЛЬКО JSON нашей схемы (plain-строки, без картинок).
-const buildPrompt = ({ text = '', urls = [], clubName = 'the club', lang = 'en' }) => {
+const buildPrompt = ({ text = '', urls = [], clubName = 'the club', lang = 'en', clubSlug = '' }) => {
   const langName = LANG_NAME[String(lang).slice(0, 2)] || 'English';
   const urlBlock = urls.length
     ? `\nAlso fetch and read these public URLs with WebFetch, extract anything useful, and SKIP any you cannot access (login-walled feeds like a private Facebook timeline will not work — just ignore them):\n${urls.map((u) => `- ${u}`).join('\n')}\n`
     : '';
   const textBlock = text ? `\nSource material provided by the club owner:\n"""\n${String(text).slice(0, 20000)}\n"""\n` : '';
+  // CTA баннера ведёт на запись именно в ЭТОТ клуб (а не на общую регистрацию платформы).
+  const joinUrl = clubSlug ? `/register?club=${clubSlug}` : '/register';
   return `You are generating public website content for a chess club called "${clubName}".
 Write ALL visible text in ${langName}.
 ${textBlock}${urlBlock}
@@ -28,13 +30,17 @@ Each BLOCK is one of:
 {"type":"heading","props":{"text":"...","level":1,"align":"left"}}   (level 1|2|3; align left|center|right)
 {"type":"text","props":{"text":"...","align":"left"}}
 {"type":"quote","props":{"text":"...","author":"..."}}
-{"type":"banner","props":{"title":"...","subtitle":"...","buttonLabel":"...","buttonUrl":"/register","bgColor":"#2B50E0"}}
+{"type":"banner","props":{"title":"...","subtitle":"...","buttonLabel":"...","buttonUrl":"${joinUrl}","bgColor":"#2B50E0"}}
 {"type":"divider","props":{}}
 Rules:
 - All text values are PLAIN strings. No HTML, no markdown.
-- Do NOT invent images, photos, names of real people, or fake achievements. If the source lacks specifics, write honest, editable placeholder copy the club can refine.
-- 5 to 12 blocks per page. Start each page with a heading (level 1 for home, level 2 for others).
-- Use a banner with a "/register" button only on the home page.`;
+- NEVER invent facts. Do not make up images, photos, names of real people, coach titles (GM/IM/FM), ratings, numbers, prices, awards, achievements, quotes or testimonials. Use ONLY what appears in the source material above.
+- If the source lacks a specific fact, simply OMIT that block or sentence — do NOT write filler. NEVER write placeholder or instructional copy addressed to the editor (forbidden: "this is a starting point", "placeholder", "ready for you to edit", "add your story/logo/photo here", "lorem ipsum", "edit this"). Every block must read as finished, public-facing copy.
+- A block with nothing real to say must be dropped entirely rather than filled with generic text.
+- 4 to 10 blocks per page. Headlines are benefits, not labels (e.g. "Learn to think three moves ahead", not "About us").
+- The public site header already shows the club name and city, so do NOT open the home page by repeating the club name as the first heading — open with a value-proposition headline instead.
+- Start each page with a heading (level 1 for home, level 2 for others).
+- Use a banner (with its "${joinUrl}" button) only on the home page.`;
 };
 
 // Спавн `claude -p ... --output-format json`. Инъектируется в тестах.
@@ -78,8 +84,8 @@ const parseGenerated = (resultStr) => {
 
 // Полный цикл: промпт → claude → парс → санитайз → апсерт черновиков.
 // repo и runClaude инъектируются (в проде — sitePage.repo и runClaudeRaw).
-const generatePages = async ({ clubId, text, urls, clubName, lang, updatedBy, repo, runClaude = runClaudeRaw }) => {
-  const prompt = buildPrompt({ text, urls, clubName, lang });
+const generatePages = async ({ clubId, text, urls, clubName, lang, clubSlug, updatedBy, repo, runClaude = runClaudeRaw }) => {
+  const prompt = buildPrompt({ text, urls, clubName, lang, clubSlug });
   const stdout = await runClaude(prompt);
   const pages = parseGenerated(extractResult(stdout));
 

@@ -8,6 +8,9 @@ const resolveClub = require('../middleware/resolveClubV2.middleware');
 const { param } = require('express-validator');
 const validate = require('../middleware/validate');
 const uploadImage = require('../middleware/uploadImage');
+const multer = require('multer');
+// Документ для автогенерации сайта (.docx/.txt/.md) — в память, до 8 МБ.
+const uploadDoc = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } }).single('document');
 const { forbidden } = require('../utils/apiError');
 const siteController = require('../controllers/site.controller');
 const mediaController = require('../controllers/media.controller');
@@ -69,6 +72,11 @@ router.get('/pages/:slug', optionalAuth, slugParam, pageController.getPublicPage
 // Создать/перезаписать черновик страницы (только владелец).
 router.put('/pages/:slug', authMiddleware, resolveClub, resolveClub.requireClub, requireOwner,
     slugParam, pageController.savePage);
+
+// Автогенерация черновиков страниц из текста/документа/ссылок через `claude -p` (только владелец).
+// Регистрируем ДО /pages/:slug/publish и /pages/:slug — у 'generate' нет :slug-коллизии.
+router.post('/pages/generate', authMiddleware, resolveClub, resolveClub.requireClub, requireOwner,
+    uploadDoc, pageController.generatePages);
 
 // Опубликовать страницу (только владелец).
 router.post('/pages/:slug/publish', authMiddleware, resolveClub, resolveClub.requireClub, requireOwner,

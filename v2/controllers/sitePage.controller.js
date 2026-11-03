@@ -135,6 +135,7 @@ const generatePages = async (req, res) => {
         text: text.trim(),
         urls,
         clubName: (club && club.name) || 'the club',
+        clubSlug: (club && club.slug) || '',
         lang: req.language || 'en',
         updatedBy: req.user.id,
         repo: sitePageRepo,

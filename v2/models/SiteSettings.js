@@ -67,6 +67,11 @@ const SiteSettingsSchema = new Schema({
 
     // Меню сайта клуба (шаг 4). Пусто — фронт показывает дефолтный набор.
     menu: { type: [MenuItemSchema], default: [] },
+
+    // Тема публичного сайта клуба — выбирает владелец (светлая по умолчанию).
+    theme: {
+        mode: { type: String, enum: ['light', 'dark'], default: 'light' },
+    },
 }, { timestamps: true });
 
 module.exports = mongoose.model('SiteSettings', SiteSettingsSchema);

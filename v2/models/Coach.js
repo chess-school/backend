@@ -61,6 +61,11 @@ const CoachSchema = new Schema({
         type: Boolean,
         default: false,
     },
+    // Показывать карточку тренера на публичном сайте клуба (тренер управляет сам; default — да).
+    showOnSite: {
+        type: Boolean,
+        default: true,
+    },
     platformRating: {
         average: { type: Number, default: 0 },
         count: { type: Number, default: 0 },

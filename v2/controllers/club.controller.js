@@ -132,10 +132,19 @@ const getBySlug = async (req, res) => {
         coachRepo.findByClubWithUser(club._id, 12), // джойн user — в шве (app-level)
         groupRepo.countByClub(club._id),
     ]);
+    // Локализация полей тренера под язык запроса (с фолбэком en → первый непустой).
+    const lang = req.language || 'en';
+    const pickL = (loc) => (loc ? (loc[lang] || loc.en || Object.values(loc).find((v) => typeof v === 'string' && v) || '') : '');
+    const pickArr = (loc) => (loc ? (loc[lang] || loc.en || Object.values(loc).find((v) => Array.isArray(v) && v.length) || []) : []);
     const coaches = coachesRaw.map((c) => ({
+        uuid: c.user ? c.user.uuid : null,
         name: c.user ? `${c.user.firstName || ''} ${c.user.lastName || ''}`.trim() : '—',
-        headline: (c.headline && (c.headline.en || Object.values(c.headline)[0])) || '',
-        title: c.fideProfile && c.fideProfile.title ? c.fideProfile.title : null,
+        headline: pickL(c.headline),
+        // Титул показываем ТОЛЬКО у подтверждённого профиля (ТЗ: titleVerified).
+        title: (c.isVerified && c.fideProfile && c.fideProfile.title && c.fideProfile.title !== 'None') ? c.fideProfile.title : null,
+        photoUrl: c.user ? (c.user.avatarUrl || null) : null,
+        bio: pickL(c.bio),
+        tags: (pickArr(c.specializations) || []).filter(Boolean).slice(0, 3),
     }));
 
     const membership = membershipDoc ? { role: membershipDoc.role, status: membershipDoc.status } : null;

@@ -11,6 +11,8 @@ const clubController = require('../controllers/club.controller');
 
 // Публичная витрина клуба для сайта /c/<slug> (бренд + тренеры + членство, если залогинен)
 router.get('/by-slug/:slug', optionalAuth, clubController.getBySlug);
+// Публичный профиль одного тренера клуба (страница /c/<slug>/coaches/<uuid>)
+router.get('/by-slug/:slug/coaches/:uuid', optionalAuth, clubController.getBySlugCoach);
 
 // Клубы текущего пользователя (переключатель клуба)
 router.get('/mine', authMiddleware, clubController.getMyClubs);

@@ -926,10 +926,16 @@ model SitePage {
   id          String         @id
   clubId      String
   slug        String
+  // Опубликованный снимок (виден посетителям). Правка черновика его не трогает.
   title       String         @default("")
   blocks      Json? // [{ id, type, props }]
   status      SitePageStatus @default(draft)
   version     Int            @default(1)
+  // Черновик — редактируемая копия, отдельно от опубликованного снимка. publish копирует draft* → поля выше.
+  draftTitle   String?
+  draftBlocks  Json?
+  draftVersion Int?
+  hasDraft     Boolean @default(false)
   updatedById String?
 
   createdAt DateTime @default(now())

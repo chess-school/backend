@@ -17,7 +17,7 @@ const prisma = () => {
 const newId = () => new mongoose.Types.ObjectId().toString();
 const s = (v) => (v == null ? v : String(v));
 
-// PG-строка → форма Mongo-дока.
+// PG-строка → ОПУБЛИКОВАННЫЙ вид (публичная отдача / результат publish).
 const pgRowToDoc = (r) => r && {
   _id: r.id,
   club: r.clubId,
@@ -31,6 +31,35 @@ const pgRowToDoc = (r) => r && {
   updatedAt: r.updatedAt,
 };
 
+// PG-строка → РЕДАКТОРСКИЙ вид: черновик поверх опубликованного снимка. Если есть несохранённый
+// черновик (hasDraft) — редактор правит его; статус 'draft'. Иначе показываем опубликованное.
+const pgRowToEditorDoc = (r) => r && {
+  _id: r.id,
+  club: r.clubId,
+  slug: r.slug,
+  title: r.hasDraft && r.draftTitle != null ? r.draftTitle : r.title,
+  blocks: r.hasDraft && Array.isArray(r.draftBlocks) ? r.draftBlocks : (Array.isArray(r.blocks) ? r.blocks : []),
+  status: r.hasDraft ? 'draft' : r.status,
+  version: r.hasDraft && r.draftVersion != null ? r.draftVersion : r.version,
+  published: r.status === 'published',   // есть ли живая опубликованная версия
+  hasDraft: !!r.hasDraft,
+  updatedBy: r.updatedById ?? undefined,
+  createdAt: r.createdAt,
+  updatedAt: r.updatedAt,
+};
+
+// Mongo-док → РЕДАКТОРСКИЙ вид (та же семантика, что pgRowToEditorDoc).
+const mongoToEditorDoc = (d) => d && {
+  _id: d._id, club: d.club, slug: d.slug,
+  title: d.hasDraft && d.draftTitle != null ? d.draftTitle : d.title,
+  blocks: d.hasDraft && Array.isArray(d.draftBlocks) ? d.draftBlocks : (Array.isArray(d.blocks) ? d.blocks : []),
+  status: d.hasDraft ? 'draft' : d.status,
+  version: d.hasDraft && d.draftVersion != null ? d.draftVersion : d.version,
+  published: d.status === 'published',
+  hasDraft: !!d.hasDraft,
+  updatedBy: d.updatedBy, createdAt: d.createdAt, updatedAt: d.updatedAt,
+};
+
 /** Опубликованная страница клуба по slug (публичная отдача). */
 async function findPublished(clubId, slug) {
   if (usePg()) {
@@ -40,66 +69,83 @@ async function findPublished(clubId, slug) {
     .select('slug title blocks version updatedAt').lean();
 }
 
-/** Список страниц клуба (мета, без тел блоков — но вернём как есть, фронт берёт нужное). */
+/** Список страниц клуба (мета). status отражает наличие несохранённого черновика ('draft'). */
 async function listByClub(clubId) {
   if (usePg()) {
     const rows = await prisma().sitePage.findMany({
       where: { clubId: s(clubId) },
       orderBy: { updatedAt: 'desc' },
-      select: { id: true, slug: true, title: true, status: true, version: true, updatedAt: true, updatedById: true },
+      select: { id: true, slug: true, title: true, status: true, version: true, hasDraft: true, updatedAt: true, updatedById: true },
     });
-    return rows.map((r) => ({ _id: r.id, slug: r.slug, title: r.title, status: r.status, version: r.version, updatedAt: r.updatedAt, updatedBy: r.updatedById ?? undefined }));
+    return rows.map((r) => ({ _id: r.id, slug: r.slug, title: r.title, status: r.hasDraft ? 'draft' : r.status, version: r.version, updatedAt: r.updatedAt, updatedBy: r.updatedById ?? undefined }));
   }
-  return SitePageMongo.find({ club: clubId })
-    .select('slug title status version updatedAt updatedBy').sort({ updatedAt: -1 }).lean();
+  const docs = await SitePageMongo.find({ club: clubId })
+    .select('slug title status version updatedAt updatedBy hasDraft').sort({ updatedAt: -1 }).lean();
+  return docs.map((d) => ({ _id: d._id, slug: d.slug, title: d.title, status: d.hasDraft ? 'draft' : d.status, version: d.version, updatedAt: d.updatedAt, updatedBy: d.updatedBy }));
 }
 
-/** Сырая страница клуба по slug (для редактора). */
+/** Страница клуба по slug для РЕДАКТОРА (черновик поверх опубликованного). */
 async function findByClubSlug(clubId, slug) {
-  if (usePg()) return pgRowToDoc(await prisma().sitePage.findUnique({ where: { clubId_slug: { clubId: s(clubId), slug } } }));
-  return SitePageMongo.findOne({ club: clubId, slug }).lean();
+  if (usePg()) return pgRowToEditorDoc(await prisma().sitePage.findUnique({ where: { clubId_slug: { clubId: s(clubId), slug } } }));
+  return mongoToEditorDoc(await SitePageMongo.findOne({ club: clubId, slug }).lean());
 }
 
-/** Создать/перезаписать черновик (upsert по club+slug), инкремент версии. */
+/** Создать/перезаписать ЧЕРНОВИК (upsert по club+slug). Опубликованный снимок НЕ трогаем —
+ *  он остаётся на сайте, пока владелец не вызовет publish. */
 async function upsertDraft(clubId, slug, { title, blocks, version, updatedBy }) {
   if (usePg()) {
     const row = await prisma().sitePage.upsert({
       where: { clubId_slug: { clubId: s(clubId), slug } },
-      update: { title, blocks, status: 'draft', version, updatedById: s(updatedBy) },
-      create: { id: newId(), clubId: s(clubId), slug, title, blocks, status: 'draft', version, updatedById: s(updatedBy) },
+      update: { draftTitle: title, draftBlocks: blocks, draftVersion: version, hasDraft: true, updatedById: s(updatedBy) },
+      create: { id: newId(), clubId: s(clubId), slug, title: '', blocks: [], status: 'draft', version: 0, draftTitle: title, draftBlocks: blocks, draftVersion: version, hasDraft: true, updatedById: s(updatedBy) },
+    });
+    return pgRowToEditorDoc(row);
+  }
+  const doc = await SitePageMongo.findOneAndUpdate(
+    { club: clubId, slug },
+    {
+      $set: { club: clubId, slug, draftTitle: title, draftBlocks: blocks, draftVersion: version, hasDraft: true, updatedBy },
+      $setOnInsert: { title: '', blocks: [], status: 'draft', version: 0 },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: false, runValidators: true },
+  ).lean();
+  return mongoToEditorDoc(doc);
+}
+
+/** Текущая версия для инкремента — draftVersion, иначе опубликованная version; null если нет записи. */
+async function getVersion(clubId, slug) {
+  if (usePg()) {
+    const r = await prisma().sitePage.findUnique({ where: { clubId_slug: { clubId: s(clubId), slug } }, select: { version: true, draftVersion: true } });
+    return r ? (r.draftVersion ?? r.version) : null;
+  }
+  const r = await SitePageMongo.findOne({ club: clubId, slug }).select('version draftVersion').lean();
+  return r ? (r.draftVersion ?? r.version) : null;
+}
+
+/** Опубликовать: скопировать черновик (если есть) в опубликованный снимок и очистить draft.
+ *  Возвращает опубликованный док или null (нет записи). */
+async function publish(clubId, slug, updatedBy) {
+  if (usePg()) {
+    const r = await prisma().sitePage.findUnique({ where: { clubId_slug: { clubId: s(clubId), slug } } });
+    if (!r) return null;
+    const title = r.hasDraft && r.draftTitle != null ? r.draftTitle : r.title;
+    const blocks = r.hasDraft && r.draftBlocks != null ? r.draftBlocks : r.blocks;
+    const version = r.hasDraft && r.draftVersion != null ? r.draftVersion : r.version;
+    const row = await prisma().sitePage.update({
+      where: { clubId_slug: { clubId: s(clubId), slug } },
+      data: { title, blocks, version, status: 'published', draftTitle: null, draftBlocks: null, draftVersion: null, hasDraft: false, updatedById: s(updatedBy) },
     });
     return pgRowToDoc(row);
   }
+  const d = await SitePageMongo.findOne({ club: clubId, slug }).lean();
+  if (!d) return null;
+  const title = d.hasDraft && d.draftTitle != null ? d.draftTitle : d.title;
+  const blocks = d.hasDraft && Array.isArray(d.draftBlocks) ? d.draftBlocks : d.blocks;
+  const version = d.hasDraft && d.draftVersion != null ? d.draftVersion : d.version;
   return SitePageMongo.findOneAndUpdate(
     { club: clubId, slug },
-    { $set: { club: clubId, slug, title, blocks, status: 'draft', version, updatedBy } },
-    { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true },
-  ).lean();
-}
-
-/** Текущая версия страницы (для инкремента) — null если нет. */
-async function getVersion(clubId, slug) {
-  if (usePg()) {
-    const r = await prisma().sitePage.findUnique({ where: { clubId_slug: { clubId: s(clubId), slug } }, select: { version: true } });
-    return r ? r.version : null;
-  }
-  const r = await SitePageMongo.findOne({ club: clubId, slug }).select('version').lean();
-  return r ? r.version : null;
-}
-
-/** Опубликовать страницу. Возвращает обновлённый док или null. */
-async function publish(clubId, slug, updatedBy) {
-  if (usePg()) {
-    try {
-      const row = await prisma().sitePage.update({
-        where: { clubId_slug: { clubId: s(clubId), slug } },
-        data: { status: 'published', updatedById: s(updatedBy) },
-      });
-      return pgRowToDoc(row);
-    } catch { return null; } // P2025 — нет записи
-  }
-  return SitePageMongo.findOneAndUpdate(
-    { club: clubId, slug }, { $set: { status: 'published', updatedBy } }, { new: true },
+    { $set: { title, blocks, version, status: 'published', draftTitle: null, draftBlocks: null, draftVersion: null, hasDraft: false, updatedBy } },
+    { new: true },
   ).lean();
 }
 

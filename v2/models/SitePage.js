@@ -25,10 +25,18 @@ const SitePageSchema = new Schema({
     slug: { type: String, trim: true, lowercase: true, maxlength: 60, required: true },  // home/about/...
     title: { type: String, trim: true, maxlength: 160, default: '' },
 
+    // ОПУБЛИКОВАННЫЙ снимок (то, что видят посетители). Правка черновика его НЕ трогает.
     blocks: { type: [BlockSchema], default: [] },
 
     status: { type: String, enum: ['draft', 'published'], default: 'draft', index: true },
     version: { type: Number, default: 1 },
+
+    // ЧЕРНОВИК — редактируемая копия, отдельно от опубликованного снимка (чтобы генерация/сохранение
+    // не снимали живую страницу с публикации). Публикация копирует draft* → опубликованные поля.
+    draftTitle: { type: String, trim: true, maxlength: 160, default: null },
+    draftBlocks: { type: [BlockSchema], default: null },
+    draftVersion: { type: Number, default: null },
+    hasDraft: { type: Boolean, default: false },
 
     updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });

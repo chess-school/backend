@@ -143,6 +143,26 @@ test('публикация делает страницу видимой публ
     assert.equal(again.data.data.page.status, 'draft');
 });
 
+test('черновик НЕ снимает страницу с публикации: публичная версия остаётся прежней до Publish', async () => {
+    // На этом шаге home опубликована (≥3 блока), а сверху лежит черновик из одного divider (из теста выше).
+    const pubBefore = await call('GET', '/site/pages/home', { slug: 'club-a' });
+    assert.equal(pubBefore.status, 200);
+    assert.ok(pubBefore.data.data.blocks.length >= 3, 'публичная версия — опубликованный снимок, не черновик');
+    assert.notDeepEqual(pubBefore.data.data.blocks.map((b) => b.type), ['divider'], 'это не черновик');
+
+    // Редактор видит ЧЕРНОВИК (divider) и статус draft.
+    const admin = await call('GET', '/site/pages/admin/home', { who: 'OwnerA', clubId: clubs.a._id });
+    assert.equal(admin.data.data.page.status, 'draft');
+    assert.deepEqual(admin.data.data.page.blocks.map((b) => b.type), ['divider']);
+
+    // После Publish публичная версия становится черновиком, а черновик очищается.
+    await call('POST', '/site/pages/home/publish', { who: 'OwnerA', clubId: clubs.a._id });
+    const pubAfter = await call('GET', '/site/pages/home', { slug: 'club-a' });
+    assert.deepEqual(pubAfter.data.data.blocks.map((b) => b.type), ['divider']);
+    const adminAfter = await call('GET', '/site/pages/admin/home', { who: 'OwnerA', clubId: clubs.a._id });
+    assert.equal(adminAfter.data.data.page.status, 'published', 'после публикации несохранённого черновика нет');
+});
+
 test('изоляция: клуб B не видит страниц клуба A в своём списке', async () => {
     const a = await call('GET', '/site/pages', { who: 'OwnerA', clubId: clubs.a._id });
     assert.equal(a.status, 200);

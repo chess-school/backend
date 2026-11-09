@@ -10,7 +10,7 @@ const usePg = () => String(process.env.CONTENT_DB || 'mongo').toLowerCase() === 
 
 let _prisma = null;
 const prisma = () => {
-  if (!_prisma) { const { PrismaClient } = require('@prisma/client'); _prisma = new PrismaClient(); }
+  if (!_prisma) { const { PrismaClient } = require('@prisma/client'); _prisma = require('../lib/prisma')(); }
   return _prisma;
 };
 

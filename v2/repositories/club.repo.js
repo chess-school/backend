@@ -6,7 +6,7 @@ const ClubMongo = require('../models/Club');
 
 const usePg = () => String(process.env.TENANT_DB || 'mongo').toLowerCase() === 'pg';
 let _prisma = null;
-const prisma = () => { if (!_prisma) { const { PrismaClient } = require('@prisma/client'); _prisma = new PrismaClient(); } return _prisma; };
+const prisma = () => { if (!_prisma) { const { PrismaClient } = require('@prisma/client'); _prisma = require('../lib/prisma')(); } return _prisma; };
 const newId = () => new mongoose.Types.ObjectId().toString();
 
 // Лимиты тарифа (та же карта, что в v2/models/Club.js pre-save).

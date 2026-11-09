@@ -5,7 +5,7 @@ const ChatMessageMongo = require('../models/ChatMessage');
 
 const usePg = () => String(process.env.MISC_DB || 'mongo').toLowerCase() === 'pg';
 let _prisma = null;
-const prisma = () => { if (!_prisma) { const { PrismaClient } = require('@prisma/client'); _prisma = new PrismaClient(); } return _prisma; };
+const prisma = () => { if (!_prisma) { const { PrismaClient } = require('@prisma/client'); _prisma = require('../lib/prisma')(); } return _prisma; };
 const s = (v) => (v == null ? null : String(v));
 const newId = () => new mongoose.Types.ObjectId().toString();
 const { ObjectId } = mongoose.Types;

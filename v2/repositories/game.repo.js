@@ -4,7 +4,7 @@ const GameMongo = require('../models/Game');
 
 const usePg = () => String(process.env.PLAY_DB || 'mongo').toLowerCase() === 'pg';
 let _prisma = null;
-const prisma = () => { if (!_prisma) { const { PrismaClient } = require('@prisma/client'); _prisma = new PrismaClient(); } return _prisma; };
+const prisma = () => { if (!_prisma) { const { PrismaClient } = require('@prisma/client'); _prisma = require('../lib/prisma')(); } return _prisma; };
 
 const pgRowToDoc = (r) => r && { _id: r.id, white: r.white, black: r.black, result: r.result, eco: r.eco, an: r.an };
 

@@ -23,7 +23,7 @@ let _prisma = null;
 const prisma = () => {
   if (!_prisma) {
     const { PrismaClient } = require('@prisma/client');
-    _prisma = new PrismaClient();
+    _prisma = require('../lib/prisma')();
   }
   return _prisma;
 };

@@ -6,7 +6,7 @@ const AppMongo = require('../models/CoachApplication');
 
 const usePg = () => String(process.env.TENANT_DB || 'mongo').toLowerCase() === 'pg';
 let _prisma = null;
-const prisma = () => { if (!_prisma) { const { PrismaClient } = require('@prisma/client'); _prisma = new PrismaClient(); } return _prisma; };
+const prisma = () => { if (!_prisma) { const { PrismaClient } = require('@prisma/client'); _prisma = require('../lib/prisma')(); } return _prisma; };
 const newId = () => new mongoose.Types.ObjectId().toString();
 
 const pgRowToDoc = (r) => r && {

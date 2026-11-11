@@ -22,11 +22,18 @@ async function listForStudent(courseId, studentId) {
   });
 }
 
-/** Сводка по курсу: число пройденных блоков и последняя активность каждого ученика. */
-async function countsByStudent(courseId) {
+/**
+ * Сводка по курсу: число пройденных блоков и последняя активность каждого ученика.
+ * @param {string[]=} validBlockIds — если передан, считаем ТОЛЬКО эти блоки (актуальные в курсе),
+ *        иначе устаревшие строки (блок удалён/пересоздан после прохождения) завышали бы completed.
+ */
+async function countsByStudent(courseId, validBlockIds) {
+  const where = Array.isArray(validBlockIds)
+    ? { courseId, blockId: { in: validBlockIds } }
+    : { courseId };
   const rows = await prisma().courseProgress.groupBy({
     by: ['studentId'],
-    where: { courseId },
+    where,
     _count: { blockId: true },
     _max: { completedAt: true },
   });

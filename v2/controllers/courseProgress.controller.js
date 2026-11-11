@@ -10,10 +10,11 @@ const { buildAccess } = require('./course.controller');
 
 const validId = (id) => mongoose.Types.ObjectId.isValid(id);
 
-const countBlocks = (modules) => {
+/** Все id блоков курса (нормализованный контент) — источник правды для total/валидации. */
+const blockIdsOf = (modules) => {
   const content = normalizeCourseContent(modules);
   const chapters = content && Array.isArray(content.chapters) ? content.chapters : [];
-  return chapters.reduce((n, ch) => n + ((ch.blocks && ch.blocks.length) || 0), 0);
+  return chapters.flatMap((ch) => (Array.isArray(ch.blocks) ? ch.blocks.map((b) => b.id).filter(Boolean) : []));
 };
 
 /** Доступен ли курс запрашивающему (ученику/тренеру). @returns {error?:number, course?:object} */
@@ -42,8 +43,13 @@ const markProgress = async (req, res) => {
   const blockId = typeof req.body.blockId === 'string' ? req.body.blockId.trim() : '';
   const chapterId = typeof req.body.chapterId === 'string' ? req.body.chapterId.trim() : null;
   if (!blockId || blockId.length > 100) return res.status(400).json({ code: 'INVALID_BLOCK', msg: 'blockId is required.' });
-  const { error } = await accessibleCourse(req, courseId);
+  const { error, course } = await accessibleCourse(req, courseId);
   if (error) return res.status(error).json({ code: 'COURSE_ACCESS', msg: 'No access to this course.' });
+  // Отмечаем только реально существующий в курсе блок — иначе прогресс копил бы «фантомные»
+  // строки (подделанный/устаревший blockId), завышая completed в сводке тренера.
+  if (!blockIdsOf(course.modules).includes(blockId)) {
+    return res.status(404).json({ code: 'BLOCK_NOT_FOUND', msg: 'No such block in this course.' });
+  }
   await courseProgressRepo.markComplete(courseId, req.user.id, blockId, chapterId);
   res.json({ data: { ok: true } });
 };
@@ -54,9 +60,10 @@ const getProgressSummary = async (req, res) => {
   const { error, course } = await accessibleCourse(req, courseId);
   if (error) return res.status(error).json({ code: 'COURSE_ACCESS', msg: 'No access to this course.' });
 
-  const total = countBlocks(course.modules);
+  const blockIds = blockIdsOf(course.modules);
+  const total = blockIds.length;
   const contracts = await trainingContractRepo.findMany({ course: courseId });
-  const counts = await courseProgressRepo.countsByStudent(courseId);
+  const counts = await courseProgressRepo.countsByStudent(courseId, blockIds);
   const countMap = new Map(counts.map((c) => [String(c.studentId), c]));
 
   // Ученики = из контрактов ∪ те, у кого уже есть прогресс.

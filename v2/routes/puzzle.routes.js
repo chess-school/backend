@@ -7,6 +7,7 @@ const router = express.Router();
 const withErrorHandling = require('../utils/withErrorHandling');
 const authMiddleware = require('../middleware/authV2.middleware');
 const validate = require('../middleware/validate');
+const roleMiddleware = require('../middleware/roleV2.middleware');
 const { query } = require('express-validator');
 
 // Подключаем наш новый контроллер
@@ -39,6 +40,22 @@ router.get(
         query('theme').optional().isString().trim().isLength({ min: 1, max: 50 }).withMessage('theme must be 1–50 characters'),
     ]),
     puzzleController.getRandomPuzzle
+);
+
+/**
+ * @route   GET /api/v2/puzzles/pick
+ * @desc    Пакет задач из базы по теме/рейтингу → inline-упражнения для конструктора курсов (Фаза B).
+ * @access  COACH/ADMIN
+ */
+router.get(
+    '/pick',
+    roleMiddleware(['COACH', 'ADMIN']),
+    validate([
+        query(['minRating', 'maxRating']).optional().isInt({ min: 0, max: 4000 }).withMessage('must be an integer 0–4000').toInt(),
+        query('theme').optional().isString().trim().isLength({ min: 1, max: 50 }).withMessage('theme must be 1–50 characters'),
+        query('count').optional().isInt({ min: 1, max: 30 }).withMessage('count must be 1–30').toInt(),
+    ]),
+    puzzleController.pickPuzzles
 );
 
 

@@ -135,6 +135,26 @@ async function getRandom(params) {
   return { count, puzzle };
 }
 
+/**
+ * N случайных РАЗНЫХ задач Lichess по теме/рейтингу — для пикера конструктора курсов (Фаза B).
+ * Повторно дёргает быстрый getRandom (индексный seek + GIN) с дедупом по id; на 6М дубли редки.
+ */
+async function pickMany({ theme, minRating, maxRating }, count = 8) {
+  const want = Math.max(1, Math.min(30, Number(count) || 8));
+  const seen = new Set();
+  const out = [];
+  const maxAttempts = want * 6;
+  for (let attempts = 0; out.length < want && attempts < maxAttempts; attempts++) {
+    const { puzzle } = await getRandom({ kind: 'lichess', theme, minRating, maxRating });
+    if (!puzzle) break; // набор пуст по фильтрам
+    const id = String(puzzle._id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(puzzle);
+  }
+  return out;
+}
+
 /** Создать/заменить одну задачу (idempotent upsert по _id). */
 async function upsertPuzzle(puzzle) {
   if (usePg()) {
@@ -185,6 +205,6 @@ async function updateBookPuzzlesMeta(bookId, { published, bookTitle }) {
 }
 
 module.exports = {
-  getRandom, upsertPuzzle, replaceManyBookPuzzles, deleteBookPuzzlesExcept, deleteById, updateBookPuzzlesMeta,
+  getRandom, pickMany, upsertPuzzle, replaceManyBookPuzzles, deleteBookPuzzlesExcept, deleteById, updateBookPuzzlesMeta,
   usePg, _pgRowToDoc: pgRowToDoc, _docToPgData: docToPgData,
 };

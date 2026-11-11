@@ -1,4 +1,40 @@
+const { Chess } = require('chess.js');
 const puzzleRepo = require('../repositories/puzzle.repo'); // шов content (mongo|pg по CONTENT_DB)
+
+/**
+ * Базовая задача Lichess {fen, moves:UCI[]} → inline-упражнение конструктора курса (Фаза B):
+ * fen = позиция ПОСЛЕ хода соперника (moves[0]), solution = SAN ходов решения (moves[1..]).
+ * Так задача из базы кладётся в курс в том же формате, что и ручные/книжные (self-contained,
+ * играется тем же useSolveSession). @returns {object|null} null — если ходы невалидны/коротки.
+ */
+const toInlineExercise = (p) => {
+    try {
+        if (!p || !Array.isArray(p.moves) || p.moves.length < 2) return null;
+        const chess = new Chess(p.fen);
+        const play = (u) => chess.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u.length > 4 ? u[4] : undefined });
+        if (!play(p.moves[0])) return null; // ход соперника создаёт позицию задачи
+        const startFen = chess.fen();
+        const san = [];
+        for (const u of p.moves.slice(1)) { const m = play(u); if (!m) break; san.push(m.san); }
+        if (san.length === 0) return null;
+        return {
+            _id: String(p._id), title: '', fen: startFen, comment: '', hint: '',
+            solution: san.join(' '), rating: p.rating, themes: p.themes || [],
+        };
+    } catch {
+        return null;
+    }
+};
+
+// @desc    Пакет задач из базы по теме/рейтингу → inline-упражнения (пикер конструктора, Фаза B)
+// @route   GET /api/v2/puzzles/pick?theme=&minRating=&maxRating=&count=
+// @access  COACH/ADMIN
+const pickPuzzles = async (req, res) => {
+    const { theme, minRating, maxRating, count } = req.query;
+    const puzzles = await puzzleRepo.pickMany({ theme, minRating, maxRating }, count);
+    const exercises = puzzles.map(toInlineExercise).filter(Boolean);
+    res.json({ data: { exercises } });
+};
 
 /** Ответ клиенту: у книжной задачи нет хода соперника перед решением */
 const toDto = (puzzle) => ({
@@ -44,4 +80,5 @@ const getRandomPuzzle = async (req, res) => {
 // Экспортируем нашу функцию, чтобы ее можно было использовать в файле маршрутов
 module.exports = {
     getRandomPuzzle,
+    pickPuzzles,
 };

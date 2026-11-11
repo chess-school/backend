@@ -36,13 +36,21 @@ const deleteMedia = async (req, res) => {
     res.json({ data: { deleted: true, id: req.params.id } });
 };
 
+// Отдаём ТОЛЬКО как один из этих типов. Запрос клиента Content-Type подделываем на безопасный,
+// иначе HTML/SVG, залитый под видом image/*, выполнил бы JS в origin приложения (stored XSS).
+const SERVEABLE_TYPES = new Set(['image/webp', 'image/png', 'image/jpeg', 'image/gif', 'image/avif']);
+
 /** @route GET /api/v2/site/media/file/* — отдать файл по ключу (драйвер mongo). ПУБЛИЧНО. */
 const serveFile = async (req, res) => {
     const key = req.params[0];
     if (!key) return res.status(404).json({ msg: 'Not found.', code: 'MEDIA_NOT_FOUND' });
     const blob = await storage.read(key);
     if (!blob) return res.status(404).json({ msg: 'Not found.', code: 'MEDIA_NOT_FOUND' });
-    res.setHeader('Content-Type', blob.contentType);
+    // Content-Type только из allowlist; всё прочее — octet-stream (браузер не выполнит как HTML).
+    const contentType = SERVEABLE_TYPES.has(blob.contentType) ? blob.contentType : 'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');   // запрещаем MIME-sniffing (защита от XSS)
+    res.setHeader('Content-Disposition', 'inline');       // никогда не как «страница»
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     return res.send(blob.data);
 };

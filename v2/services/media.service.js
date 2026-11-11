@@ -11,6 +11,11 @@
 const crypto = require('crypto');
 const MediaAsset = require('../models/MediaAsset');
 const storage = require('./storage');
+const { unprocessable } = require('../utils/apiError');
+
+// Реальные форматы изображений, которые принимаем (определяются по содержимому через sharp,
+// а НЕ по присланному Content-Type, который подделывается).
+const REAL_IMAGE_FORMATS = new Set(['png', 'jpeg', 'webp', 'gif', 'avif']);
 
 // Пытаемся получить sharp один раз; при неудаче работаем в режиме «без обработки».
 let _sharp;
@@ -51,9 +56,14 @@ const buildVariants = async ({ club, buffer, originalMime }) => {
 
     if (!sharp) return storeOriginal();
 
+    // При живом sharp НЕ храним произвольные байты: файл обязан парситься как настоящее изображение
+    // известного формата — иначе HTML/SVG под видом image/* попал бы в хранилище (stored XSS).
     let meta;
     try { meta = await sharp(buffer, { failOn: 'none' }).metadata(); }
-    catch { return storeOriginal(); }
+    catch { throw unprocessable('The uploaded file is not a valid image.', 'INVALID_IMAGE'); }
+    if (!meta.format || !REAL_IMAGE_FORMATS.has(meta.format)) {
+        throw unprocessable('Unsupported image format.', 'INVALID_IMAGE');
+    }
 
     // Анимацию (многокадровый gif) не трогаем.
     if (originalMime === 'image/gif' && (meta.pages || 1) > 1) return storeOriginal();

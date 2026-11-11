@@ -62,7 +62,13 @@ const findVisibleBook = async (req, res, projection) => {
         res.status(404).json({ msg: 'Puzzle book not found.', code: 'BOOK_NOT_FOUND' });
         return null;
     }
-    // Тренеры и админы видят все задачники; ученик — по области видимости
+    // Изоляция по клубу (#7): задачник, принадлежащий другому клубу, не виден/не редактируется
+    // НИКОМУ (включая staff) — иначе любой тренер читал/правил бы чужой клуб по bookId (IDOR).
+    if (book.club && req.club && String(book.club) !== String(req.club)) {
+        res.status(404).json({ msg: 'Puzzle book not found.', code: 'BOOK_NOT_FOUND' });
+        return null;
+    }
+    // Тренеры и админы видят все задачники СВОЕГО клуба; ученик — по области видимости
     if (!isStaff(req.user) && !(await studentCanSeeBook(req, book))) {
         res.status(404).json({ msg: 'Puzzle book not found.', code: 'BOOK_NOT_FOUND' });
         return null;
@@ -258,6 +264,13 @@ const updateBook = async (req, res) => {
 const updateExercise = async (req, res) => {
     const { bookId, exerciseId } = req.params;
     if (!mongoose.Types.ObjectId.isValid(bookId) || !mongoose.Types.ObjectId.isValid(exerciseId)) {
+        return res.status(404).json({ msg: 'Exercise not found.', code: 'EXERCISE_NOT_FOUND' });
+    }
+
+    // Изоляция по клубу (#7): нельзя править упражнение задачника другого клуба (IDOR).
+    // (Этот роут не проходит через findVisibleBook, поэтому проверяем владение здесь.)
+    const owningBook = await puzzleBookRepo.findById(bookId, { select: { club: 1 } });
+    if (!owningBook || (owningBook.club && req.club && String(owningBook.club) !== String(req.club))) {
         return res.status(404).json({ msg: 'Exercise not found.', code: 'EXERCISE_NOT_FOUND' });
     }
 

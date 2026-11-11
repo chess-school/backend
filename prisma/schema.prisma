@@ -362,6 +362,22 @@ model Position {
   @@map("positions")
 }
 
+// Прогресс ученика по курсу-конструктору (Фаза A5): одна строка = один пройденный блок.
+// Новая фича — только PG (mongo-прошлого нет). Кросс-ссылки без Prisma-связей (app-join через швы).
+model CourseProgress {
+  id          String   @id // ObjectId-строка (как и прочие PK миграции)
+  courseId    String // → courses.id
+  studentId   String // → users.id
+  blockId     String // CourseBlock.id внутри course.modules
+  chapterId   String? // CourseChapter.id (для группировки/аналитики)
+  completedAt DateTime @default(now())
+
+  @@unique([courseId, studentId, blockId]) // идемпотентность отметки
+  @@index([courseId, studentId])
+  @@index([courseId])
+  @@map("course_progress")
+}
+
 // --- Домен 6: Learning (Assignment, Submission, PuzzleAttempt, ScheduleV2) ---
 // Домашки/сдачи/попытки/расписание. Кросс-ссылки (clubId/authorId=Coach/studentId=User/
 // scheduleId/puzzleBookId/coachId/contractId/contextRefId) БЕЗ Prisma-связей — джойнятся

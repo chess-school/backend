@@ -348,6 +348,8 @@ model Puzzle {
   @@index([rating])
   @@index([sourceKind, sourcePublished, rating])
   @@index([sourceBook])
+  // GIN по themes[] — фильтры задач по теме (survival/rush, getRandom theme) на 6М строк.
+  @@index([themes(ops: ArrayOps)], type: Gin, map: "puzzles_themes_gin")
   @@map("puzzles")
 }
 

@@ -31,10 +31,14 @@ async function accessibleCourse(req, courseId) {
 /** GET /courses/:courseId/progress — свой прогресс (пройденные blockId). */
 const getMyProgress = async (req, res) => {
   const { courseId } = req.params;
-  const { error } = await accessibleCourse(req, courseId);
+  const { error, course } = await accessibleCourse(req, courseId);
   if (error) return res.status(error).json({ code: 'COURSE_ACCESS', msg: 'No access to this course.' });
   const list = await courseProgressRepo.listForStudent(courseId, req.user.id);
-  res.json({ data: { completed: list.map((b) => b.blockId), details: list } });
+  // Отдаём только блоки, существующие в курсе сейчас (удалённые после прохождения отсеиваем —
+  // иначе плеер считал бы долю >100%).
+  const valid = new Set(blockIdsOf(course.modules));
+  const details = list.filter((b) => valid.has(b.blockId));
+  res.json({ data: { completed: details.map((b) => b.blockId), details } });
 };
 
 /** POST /courses/:courseId/progress {blockId, chapterId?} — отметить блок пройденным. */

@@ -5,6 +5,7 @@ const authMiddleware = require('../middleware/authV2.middleware');
 const optionalAuthMiddleware = require('../middleware/optionalAuthV2.middleware');
 const roleMiddleware = require('../middleware/roleV2.middleware');
 const courseController = require('../controllers/course.controller');
+const courseProgressController = require('../controllers/courseProgress.controller');
 
 // =================================================================
 //                         ПУБЛИЧНЫЕ РОУТЫ
@@ -24,6 +25,25 @@ router.get('/', optionalAuthMiddleware, require('../middleware/resolveClubV2.mid
  *          optionalAuth: роль влияет на доступ.
  */
 router.get('/:courseId', optionalAuthMiddleware, courseController.getCourseById);
+
+
+// =================================================================
+//          ПРОГРЕСС УЧЕНИКА ПО КУРСУ (Фаза A5)
+// =================================================================
+
+/** @route GET /api/v2/courses/:courseId/progress — свой прогресс (пройденные блоки). */
+router.get('/:courseId/progress', authMiddleware, courseProgressController.getMyProgress);
+
+/** @route POST /api/v2/courses/:courseId/progress {blockId,chapterId?} — отметить блок пройденным. */
+router.post('/:courseId/progress', authMiddleware, courseProgressController.markProgress);
+
+/** @route GET /api/v2/courses/:courseId/progress/summary — сводка по ученикам (COACH/ADMIN). */
+router.get(
+    '/:courseId/progress/summary',
+    authMiddleware,
+    roleMiddleware(['COACH', 'ADMIN']),
+    courseProgressController.getProgressSummary
+);
 
 
 // =================================================================

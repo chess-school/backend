@@ -3,6 +3,7 @@
 const courseRepo = require('../repositories/course.repo'); // шов content (mongo|pg по CONTENT_DB)
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const groupRepo = require('../repositories/group.repo'); // шов tenant (mongo|pg по TENANT_DB)
+const { isNewContent, validateCourseContent, normalizeCourseContent } = require('../domain/courseContent'); // контент-конструктор (Фаза A)
 const mongoose = require('mongoose');
 
 const VISIBILITIES = ['draft', 'private', 'group', 'public'];
@@ -61,13 +62,24 @@ const createCourse = async (req, res) => {
         return res.status(400).json({ msg: `Invalid visibility. Must be one of: ${VISIBILITIES.join(', ')}.`, code: 'INVALID_VISIBILITY' });
     }
 
+    // Контент-конструктор (Фаза A): новый формат {version,chapters[blocks]} валидируем и храним каноном.
+    // Легаси-массив модулей — пропускаем как есть (обратная совместимость).
+    let modulesToStore = modules;
+    if (isNewContent(modules)) {
+        const v = validateCourseContent(modules);
+        if (!v.ok) {
+            return res.status(400).json({ msg: 'Invalid course content.', code: 'INVALID_COURSE_CONTENT', errors: v.errors });
+        }
+        modulesToStore = v.value;
+    }
+
     const course = await courseRepo.create({
         title,
         description,
         price,
         level,
         tags,
-        modules,
+        modules: modulesToStore,
         language: language || 'en',
         visibility: visibility || 'draft',
         allowedUsers: Array.isArray(allowedUsers) ? allowedUsers : [],
@@ -121,6 +133,15 @@ const updateCourse = async (req, res) => {
 
     if (updateData.visibility !== undefined && !VISIBILITIES.includes(updateData.visibility)) {
         return res.status(400).json({ msg: `Invalid visibility. Must be one of: ${VISIBILITIES.join(', ')}.`, code: 'INVALID_VISIBILITY' });
+    }
+
+    // Контент-конструктор (Фаза A): валидируем новый формат modules; легаси проходит как есть.
+    if (updateData.modules !== undefined && isNewContent(updateData.modules)) {
+        const v = validateCourseContent(updateData.modules);
+        if (!v.ok) {
+            return res.status(400).json({ msg: 'Invalid course content.', code: 'INVALID_COURSE_CONTENT', errors: v.errors });
+        }
+        updateData.modules = v.value;
     }
 
     if (!mongoose.Types.ObjectId.isValid(courseId)) {
@@ -257,6 +278,9 @@ const getCourseById = async (req, res) => {
     }
 
     await attachAuthors(course); // джойн авторов — app-level через швы
+    // Контент-конструктор (Фаза A): отдаём modules каноном {version,chapters[blocks]}.
+    // Легаси-курсы адаптируются на лету (strangler), новый формат проходит валидатор.
+    course.modules = normalizeCourseContent(course.modules);
     res.json(course);
 };
 

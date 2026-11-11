@@ -86,10 +86,47 @@ const pgWhere = ({ kind, bookId, exclude, theme, minRating, maxRating }) => {
 async function getRandom(params) {
   if (usePg()) {
     const where = pgWhere(params);
-    const count = await prisma().puzzle.count({ where });
-    if (count === 0) return { count: 0, puzzle: null };
-    const rows = await prisma().puzzle.findMany({ where, skip: Math.floor(Math.random() * count), take: 1 });
-    return { count, puzzle: pgRowToDoc(rows[0]) };
+
+    // Книжные задачи — малый набор, индекс по sourceBook делает и COUNT, и OFFSET дёшевыми,
+    // а точный total нужен UI книги (и ожидается тестами). Оставляем прежнюю точную схему.
+    if (params.bookId || params.kind === 'book') {
+      const count = await prisma().puzzle.count({ where });
+      if (count === 0) return { count: 0, puzzle: null };
+      const rows = await prisma().puzzle.findMany({ where, skip: Math.floor(Math.random() * count), take: 1 });
+      return { count, puzzle: pgRowToDoc(rows[0]) };
+    }
+
+    // Большие таблицы Lichess (~6М): и OFFSET N, и фильтрованный COUNT (особенно по themes[]/
+    // kind=all) — это O(N), т.е. 1–3с на каждый запрос Rating Climb/survival. Вместо этого берём
+    // задачу индексным seek по @@index([rating]): случайная точка рейтинга + ближайшая задача
+    // (монетка вверх/вниз; take:1 останавливает скан на первой подходящей строке — миллисекунды).
+    // Пустота набора = !row: seek вверх ОТ target и вниз покрывают всю рейтинговую ось набора.
+    // Точный total здесь не считаем — фронт его игнорирует (getRandomPuzzle возвращает лишь задачу).
+    const lo = params.minRating !== undefined ? Number(params.minRating) : 400;
+    const hi = params.maxRating !== undefined ? Number(params.maxRating) : 3200;
+    const target = Math.floor(Math.min(lo, hi) + Math.random() * Math.max(1, Math.abs(hi - lo)));
+    const base = where.AND;
+    // Каждый seek ограничиваем statement_timeout: для валидного набора задача находится за
+    // миллисекунды (GIN по themes + btree по rating), а патологический скан по ПУСТОМУ набору
+    // (валидная тема без задач в узком рейтинг-окне и т.п.) обрывается и честно трактуется как
+    // «не найдено» вместо многосекундного прохода всей таблицы. 404 на пустой фильтр корректен.
+    const seek = async (dir) => {
+      try {
+        return await prisma().$transaction(async (tx) => {
+          await tx.$executeRawUnsafe("SET LOCAL statement_timeout = 1500");
+          return tx.puzzle.findMany({
+            where: { AND: [...base, dir === 'up' ? { rating: { gte: target } } : { rating: { lte: target } }] },
+            orderBy: { rating: dir === 'up' ? 'asc' : 'desc' },
+            take: 1,
+          });
+        });
+      } catch (e) {
+        return []; // таймаут/отмена скана → трактуем как отсутствие совпадения в этом направлении
+      }
+    };
+    const first = Math.random() < 0.5 ? 'up' : 'down';
+    const row = (await seek(first))[0] || (await seek(first === 'up' ? 'down' : 'up'))[0];
+    return { count: row ? 1 : 0, puzzle: row ? pgRowToDoc(row) : null };
   }
   const filter = mongoFilter(params);
   const count = await PuzzleMongo.countDocuments(filter);

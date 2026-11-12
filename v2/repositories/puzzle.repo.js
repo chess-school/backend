@@ -61,7 +61,11 @@ const mongoFilter = ({ kind, bookId, exclude, theme, minRating, maxRating }) => 
     if (maxRating !== undefined) rating.$lte = maxRating;
     filter.$and.push(kind === 'all' ? { $or: [{ 'source.kind': 'book' }, { rating }] } : { rating });
   }
-  if (exclude) filter._id = { $ne: exclude };
+  if (exclude) {
+    const ids = String(exclude).split(',').map((s) => s.trim()).filter(Boolean);
+    if (ids.length === 1) filter._id = { $ne: ids[0] };
+    else if (ids.length > 1) filter._id = { $nin: ids };
+  }
   return filter;
 };
 
@@ -78,7 +82,12 @@ const pgWhere = ({ kind, bookId, exclude, theme, minRating, maxRating }) => {
     if (maxRating !== undefined) rating.lte = Number(maxRating);
     AND.push(kind === 'all' ? { OR: [{ sourceKind: 'book' }, { rating }] } : { rating });
   }
-  if (exclude) AND.push({ id: { not: String(exclude) } });
+  if (exclude) {
+    // exclude может быть списком через запятую (анти-повтор в Rating Climb/Survival).
+    const ids = String(exclude).split(',').map((s) => s.trim()).filter(Boolean);
+    if (ids.length === 1) AND.push({ id: { not: ids[0] } });
+    else if (ids.length > 1) AND.push({ id: { notIn: ids } });
+  }
   return { AND };
 };
 

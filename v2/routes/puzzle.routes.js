@@ -36,8 +36,9 @@ router.get(
         query(['minRating', 'maxRating']).optional().isInt({ min: 0, max: 4000 }).withMessage('must be an integer 0–4000').toInt(),
         query('source').optional().isIn(['all', 'lichess', 'book']).withMessage('source must be all, lichess or book'),
         query('bookId').optional().isMongoId().withMessage('bookId must be a valid id'),
-        query('exclude').optional().isString().isLength({ max: 100 }),
+        query('exclude').optional().isString().isLength({ max: 1200 }).withMessage('exclude too long'), // список id через запятую (анти-повтор)
         query('theme').optional().isString().trim().isLength({ min: 1, max: 50 }).withMessage('theme must be 1–50 characters'),
+        query('themes').not().exists().withMessage('Use "theme" (singular), not "themes".'), // частая ошибка — не глотаем молча
     ]),
     puzzleController.getRandomPuzzle
 );
@@ -53,6 +54,7 @@ router.get(
     validate([
         query(['minRating', 'maxRating']).optional().isInt({ min: 0, max: 4000 }).withMessage('must be an integer 0–4000').toInt(),
         query('theme').optional().isString().trim().isLength({ min: 1, max: 50 }).withMessage('theme must be 1–50 characters'),
+        query('themes').not().exists().withMessage('Use "theme" (singular), not "themes".'),
         query('count').optional().isInt({ min: 1, max: 30 }).withMessage('count must be 1–30').toInt(),
     ]),
     puzzleController.pickPuzzles

@@ -30,4 +30,13 @@ async function findByMoves(regex, limit = 100) {
   return GameMongo.find({ an: { $regex: regex } }).limit(limit).select('white black result an');
 }
 
-module.exports = { findByPlayer, findByMoves, usePg, _pgRowToDoc: pgRowToDoc };
+/** Выборка партий без фильтра — для стартовой позиции (корень всех партий). */
+async function sample(limit = 30) {
+  if (usePg()) {
+    const rows = await prisma().game.findMany({ take: limit, orderBy: { id: 'desc' }, select: { id: true, white: true, black: true, result: true, an: true } });
+    return rows.map((r) => ({ _id: r.id, white: r.white, black: r.black, result: r.result, an: r.an }));
+  }
+  return GameMongo.find().limit(limit).sort({ _id: -1 }).select('white black result an');
+}
+
+module.exports = { findByPlayer, findByMoves, sample, usePg, _pgRowToDoc: pgRowToDoc };

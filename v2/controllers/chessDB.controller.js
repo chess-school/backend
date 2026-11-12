@@ -70,9 +70,10 @@ const getGamesByPgnHistory = async (req, res) => {
     try {
         const { pgn } = req.body;
 
-        // Если пришел пустой PGN или его нет, возвращаем пустой массив
+        // Пустой PGN = стартовая позиция (корень всех партий): отдаём выборку, а не пусто.
         if (!pgn || pgn.trim() === '') {
-            return res.status(200).json({ success: true, data: [] });
+            const games = await gameRepo.sample(30);
+            return res.status(200).json({ success: true, data: games });
         }
 
         // Убираем из PGN возможные заголовки и результат для чистоты поиска
@@ -82,7 +83,8 @@ const getGamesByPgnHistory = async (req, res) => {
             .trim();
         
         if (cleanPgn === '') {
-            return res.status(200).json({ success: true, data: [] });
+            const games = await gameRepo.sample(30);
+            return res.status(200).json({ success: true, data: games });
         }
 
         const escapeRegex = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

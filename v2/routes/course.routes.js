@@ -20,6 +20,12 @@ const courseProgressController = require('../controllers/courseProgress.controll
 router.get('/', optionalAuthMiddleware, require('../middleware/resolveClubV2.middleware'), courseController.getPublicCourses);
 
 /**
+ * @route   GET /api/v2/courses/enrolled
+ * @desc    Курсы, на которые зачислен текущий ученик (раздел «My courses»). ДО /:courseId.
+ */
+router.get('/enrolled', authMiddleware, courseController.getEnrolledCourses);
+
+/**
  * @route   GET /api/v2/courses/:courseId
  * @desc    Получить один курс. Приватные/черновые курсы для посторонних → 403.
  *          optionalAuth: роль влияет на доступ.

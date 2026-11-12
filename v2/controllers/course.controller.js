@@ -1,6 +1,7 @@
 // v2/controllers/course.controller.js
 
 const courseRepo = require('../repositories/course.repo'); // шов content (mongo|pg по CONTENT_DB)
+const trainingContractRepo = require('../repositories/trainingContract.repo'); // шов coaching — зачисления ученика
 const coachRepo = require('../repositories/coach.repo'); // шов coaching (mongo|pg по COACHING_DB)
 const groupRepo = require('../repositories/group.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const { isNewContent, validateCourseContent, normalizeCourseContent } = require('../domain/courseContent'); // контент-конструктор (Фаза A)
@@ -285,9 +286,30 @@ const getCourseById = async (req, res) => {
 };
 
 
+/**
+ * @desc    Курсы, на которые зачислен текущий ученик (по TrainingContract). Для раздела «My courses».
+ * @route   GET /api/v2/courses/enrolled
+ * @access  Private
+ */
+const getEnrolledCourses = async (req, res) => {
+    const contracts = await trainingContractRepo.findMany({ student: req.user.id });
+    const courseIds = [...new Set(contracts.map((c) => c.course).filter(Boolean).map(String))];
+    if (!courseIds.length) return res.json({ data: [] });
+    const courses = await courseRepo.findByIds(courseIds);
+    // Отдаём краткие карточки; ученику показываем все его зачисления (статус — для бейджа).
+    const data = courses.map((c) => ({
+        _id: String(c._id || c.id),
+        title: c.title,
+        description: c.description || '',
+        status: c.status || 'published',
+    }));
+    res.json({ data });
+};
+
 module.exports = {
     createCourse,
     getMyCourses,
+    getEnrolledCourses,
     updateCourse,
     updateCourseStatus,
     getPublicCourses,

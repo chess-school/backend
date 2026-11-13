@@ -16,7 +16,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const readline = require('readline');
-const { PrismaClient } = require('@prisma/client');
+const makeScriptPrisma = require('./_prismaClient');
 
 const DRY = process.argv.includes('--dry');
 const fileArg = (process.argv.find((a) => a.startsWith('--file=')) || '').slice('--file='.length);
@@ -25,9 +25,8 @@ const LIMIT = limitArg ? parseInt(limitArg, 10) : Infinity;
 const FILE = fileArg || path.join(os.homedir(), 'chess-data', 'puzzles', 'lichess_db_puzzle.csv');
 const BATCH = 5000;
 
-// Отдельный клиент с умеренным пулом, чтобы не конкурировать с кластером приложения.
-const url = (process.env.DATABASE_URL || '').replace(/([&?])connection_limit=\d+/, '$1connection_limit=5');
-const prisma = new PrismaClient(url ? { datasources: { db: { url } } } : undefined);
+// Отдельный клиент с умеренным пулом (5), чтобы не конкурировать с кластером приложения.
+const prisma = makeScriptPrisma(5);
 
 const toInt = (v) => {
   const n = parseInt(v, 10);

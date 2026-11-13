@@ -15,7 +15,7 @@ const path = require('path');
 const fs = require('fs');
 const readline = require('readline');
 const crypto = require('crypto');
-const { PrismaClient } = require('@prisma/client');
+const makeScriptPrisma = require('./_prismaClient');
 
 const DRY = process.argv.includes('--dry');
 const arg = (k, d) => {
@@ -27,8 +27,8 @@ const DIR = arg('dir', path.join(os.homedir(), 'chess-data', 'games'));
 const LIMIT = arg('limit', '') ? parseInt(arg('limit', ''), 10) : Infinity;
 const BATCH = 2000;
 
-const url = (process.env.DATABASE_URL || '').replace(/([&?])connection_limit=\d+/, '$1connection_limit=5');
-const prisma = new PrismaClient(url ? { datasources: { db: { url } } } : undefined);
+// Отдельный клиент с умеренным пулом (5), чтобы не конкурировать с кластером приложения.
+const prisma = makeScriptPrisma(5);
 
 function walk(dir) {
   const out = [];

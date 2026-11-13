@@ -7,14 +7,26 @@
 // "remaining connection slots are reserved for roles with the SUPERUSER attribute").
 //
 // ТЕПЕРЬ клиент один на процесс (ленивая инициализация сохранена — при флагах *_DB=mongo
-// БД не трогается до первого обращения). Размер пула задаётся `connection_limit`
-// в DATABASE_URL (см. .env): 4 воркера × connection_limit держат сумму < max_connections.
+// БД не трогается до первого обращения).
+//
+// Prisma 7: Rust-движок убран, подключение идёт через driver adapter (@prisma/adapter-pg).
+// Размер пула задаём напрямую в адаптере (`max`), а не через `connection_limit` в URL
+// (pg-драйвер его не понимает): 4 воркера × max(10) держат сумму коннектов < max_connections.
 let _client = null;
+
+// Пул коннектов на воркер. Раньше был connection_limit=10 в DATABASE_URL (Prisma 6);
+// в v7 за пул отвечает pg-драйвер адаптера, параметр URL он игнорирует.
+const POOL_MAX = Number(process.env.PG_POOL_MAX) || 10;
 
 function getPrisma() {
   if (!_client) {
     const { PrismaClient } = require('@prisma/client');
-    _client = new PrismaClient();
+    const { PrismaPg } = require('@prisma/adapter-pg');
+    const adapter = new PrismaPg({
+      connectionString: process.env.DATABASE_URL,
+      max: POOL_MAX,
+    });
+    _client = new PrismaClient({ adapter });
   }
   return _client;
 }

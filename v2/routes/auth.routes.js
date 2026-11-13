@@ -43,6 +43,13 @@ router.post(
     authController.login
 );
 
+/**
+ * @route   POST /api/v2/auth/logout
+ * @desc    Выход — удаляет HttpOnly-cookie с токеном
+ * @access  Public
+ */
+router.post('/logout', authController.logout);
+
 // =================================================================
 //                      ВЕРИФИКАЦИЯ EMAIL
 // =================================================================

@@ -33,6 +33,7 @@
 const mongoose = require('mongoose');
 const i18next = require('i18next');
 const { verifyAccessToken } = require('../v2/utils/accessToken');
+const { tokenFromHandshake } = require('../v2/utils/authCookie');
 const { ApiError, badRequest } = require('../v2/utils/apiError');
 const User = require('../v2/models/User');
 const manager = require('../v2/services/classroom/classroomManager');
@@ -101,7 +102,7 @@ const initializeClassroomSocket = (io) => {
 
     nsp.use(async (socket, next) => {
         try {
-            socket.user = await verifyAccessToken(socket.handshake.auth && socket.handshake.auth.token);
+            socket.user = await verifyAccessToken(tokenFromHandshake(socket.handshake));
             next();
         } catch (e) {
             const err = new Error(e.message || 'Unauthorized');

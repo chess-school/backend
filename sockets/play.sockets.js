@@ -21,6 +21,7 @@
 const mongoose = require('mongoose');
 const i18next = require('i18next');
 const { verifyAccessToken } = require('../v2/utils/accessToken');
+const { tokenFromHandshake } = require('../v2/utils/authCookie');
 const { ApiError, badRequest } = require('../v2/utils/apiError');
 const { getGameManager } = require('../v2/services/play');
 const { setPlayNamespace, gameRoom, userRoom } = require('../v2/services/play/playRealtime');
@@ -76,7 +77,7 @@ const initializePlaySocket = (io, services = {}) => {
 
     nsp.use(async (socket, next) => {
         try {
-            socket.user = await verifyAccessToken(socket.handshake.auth && socket.handshake.auth.token);
+            socket.user = await verifyAccessToken(tokenFromHandshake(socket.handshake));
             next();
         } catch (e) {
             const err = new Error(e.message || 'Unauthorized');

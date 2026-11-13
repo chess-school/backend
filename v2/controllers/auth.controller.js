@@ -4,7 +4,8 @@ const { validationResult } = require('express-validator');
 const { randomBytes, randomUUID } = require('crypto'); 
 const userRepo = require('../repositories/user.repo'); // шов identity (mongo|pg по USER_DB)
 const playerRepo = require('../repositories/player.repo'); // шов tenant (mongo|pg по TENANT_DB)
-const { sendVerificationEmailV2 } = require('../utils/email/email.service'); 
+const { sendVerificationEmailV2 } = require('../utils/email/email.service');
+const { setAuthCookie, clearAuthCookie } = require('../utils/authCookie');
 
 /**
  * Утилита для генерации JWT токена.
@@ -70,6 +71,10 @@ const login = async (req, res) => {
     const newSessionTokenVersion = await userRepo.incrementSessionTokenVersion(user._id);
 
     const token = generateAccessToken(user._id, user.roles, newSessionTokenVersion, user.uuid);
+
+    // Основной транспорт токена — HttpOnly-cookie (недоступна JS, не крадётся через XSS).
+    // token в теле оставлен для обратной совместимости (старые вкладки/socket-auth).
+    setAuthCookie(res, token, req);
 
     res.status(200).json({
         token,
@@ -159,10 +164,21 @@ const checkVerificationStatus = async (req, res) => {
     res.json({ emailVerified: user.emailVerified });
 };
 
+/**
+ * @desc    Выход: удаляет HttpOnly-cookie с токеном
+ * @route   POST /api/v2/auth/logout
+ * @access  Public (идемпотентно — работает и без активной сессии)
+ */
+const logout = async (req, res) => {
+    clearAuthCookie(res, req);
+    res.status(200).json({ msg: 'Logged out.' });
+};
+
 
 module.exports = {
     register,
     login,
+    logout,
     verifyEmail,
     resendVerificationEmail,
     checkVerificationStatus

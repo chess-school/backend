@@ -13,6 +13,7 @@
 
 const i18next = require('i18next');
 const { verifyAccessToken } = require('../v2/utils/accessToken');
+const { tokenFromHandshake } = require('../v2/utils/authCookie');
 const { ApiError } = require('../v2/utils/apiError');
 const chatService = require('../v2/services/chat.service');
 const { setChatNamespace, userRoom } = require('../v2/services/chatRealtime');
@@ -58,7 +59,7 @@ const initializeChatSocket = (io) => {
 
     nsp.use(async (socket, next) => {
         try {
-            socket.user = await verifyAccessToken(socket.handshake.auth && socket.handshake.auth.token);
+            socket.user = await verifyAccessToken(tokenFromHandshake(socket.handshake));
             next();
         } catch (e) {
             const err = new Error(e.message || 'Unauthorized');

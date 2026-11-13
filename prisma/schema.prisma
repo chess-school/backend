@@ -6,10 +6,10 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Prisma 7: URL-ы подключения вынесены в prisma.config.cjs (для Migrate CLI),
+// а рантайм ходит через driver adapter (@prisma/adapter-pg) из v2/lib/prisma.js.
 datasource db {
-  provider          = "postgresql"
-  url               = env("DATABASE_URL")
-  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+  provider = "postgresql"
 }
 
 // --- Домен 1 (пилот): Notification (v2 NotificationV2, коллекция notificationv2s) ---

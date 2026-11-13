@@ -5,7 +5,7 @@
 
 require('dotenv').config();
 const mongoose = require('mongoose');
-const { PrismaClient } = require('@prisma/client');
+const makeScriptPrisma = require('./_prismaClient');
 
 const DRY = process.argv.includes('--dry');
 const BATCH = 1000;
@@ -87,7 +87,7 @@ async function migrateOne(prisma, Model, table, mapRow) {
 }
 
 (async () => {
-  const prisma = new PrismaClient();
+  const prisma = makeScriptPrisma();
   await mongoose.connect(process.env.MONGO_URI);
   try {
     await migrateOne(prisma, require('../v2/models/Game'), 'game', toGame);

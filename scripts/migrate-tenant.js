@@ -7,7 +7,7 @@
 
 require('dotenv').config();
 const mongoose = require('mongoose');
-const { PrismaClient } = require('@prisma/client');
+const makeScriptPrisma = require('./_prismaClient');
 
 const DRY = process.argv.includes('--dry');
 const BATCH = 500;
@@ -134,7 +134,7 @@ async function migrateCollection(Model, toRow, prismaDelegate, label) {
   const Player = require('../v2/models/Player'); // модель 'PlayerV2' → коллекция playerv2
   const CoachApplication = require('../v2/models/CoachApplication');
   const CoachRequest = require('../v2/models/CoachRequest');
-  const prisma = new PrismaClient();
+  const prisma = makeScriptPrisma();
 
   await migrateCollection(Club, toClubRow, prisma.club, 'clubs');
   await migrateCollection(ClubMembership, toMembershipRow, prisma.clubMembership, 'clubmemberships');

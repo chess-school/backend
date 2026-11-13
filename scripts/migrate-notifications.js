@@ -8,7 +8,7 @@
 
 require('dotenv').config();
 const mongoose = require('mongoose');
-const { PrismaClient } = require('@prisma/client');
+const makeScriptPrisma = require('./_prismaClient');
 
 const DRY = process.argv.includes('--dry');
 const BATCH = 1000;
@@ -33,7 +33,7 @@ const toPgRow = (d) => ({
 
   await mongoose.connect(process.env.MONGO_URI);
   const Notification = require('../v2/models/Notification');
-  const prisma = new PrismaClient();
+  const prisma = makeScriptPrisma();
 
   const total = await Notification.countDocuments();
   console.log(`[etl] источник Atlas: ${total} уведомлений`);

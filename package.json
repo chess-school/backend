@@ -19,7 +19,8 @@
     "@aws-sdk/client-dynamodb": "^3.943.0",
     "@aws-sdk/client-s3": "^3.1161.0",
     "@aws-sdk/lib-dynamodb": "^3.943.0",
-    "@prisma/client": "^6.19.3",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
     "@socket.io/redis-adapter": "^8.3.0",
     "bcrypt": "^6.0.0",
     "body-parser": "^1.20.2",
@@ -55,12 +56,15 @@
     "copyfiles": "^2.4.1",
     "mongodb-memory-server": "^10.1.4",
     "nodemon": "^3.1.4",
-    "prisma": "^6.19.3",
+    "prisma": "^7.10.1",
     "socket.io-client": "^4.8.1",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   },
   "overrides": {
-    "qs": "6.16.1"
+    "qs": "6.16.1",
+    "nodemon": {
+      "minimatch": "^11.0.4"
+    }
   }
 }

@@ -7,7 +7,7 @@
 
 require('dotenv').config();
 const mongoose = require('mongoose');
-const { PrismaClient } = require('@prisma/client');
+const makeScriptPrisma = require('./_prismaClient');
 
 const DRY = process.argv.includes('--dry');
 const BATCH = 1000;
@@ -37,7 +37,7 @@ const toRow = (d) => ({
 
   await mongoose.connect(process.env.MONGO_URI);
   const Puzzle = require('../v2/models/Puzzle');
-  const prisma = new PrismaClient();
+  const prisma = makeScriptPrisma();
 
   const total = await Puzzle.countDocuments();
   console.log(`[etl] источник Atlas: ${total} puzzles`);

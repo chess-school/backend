@@ -5,7 +5,7 @@
 
 require('dotenv').config();
 const mongoose = require('mongoose');
-const { PrismaClient } = require('@prisma/client');
+const makeScriptPrisma = require('./_prismaClient');
 
 const DRY = process.argv.includes('--dry');
 const BATCH = 1000;
@@ -30,7 +30,7 @@ const toPgRow = (d) => ({
   if (!process.env.MONGO_URI || !process.env.DATABASE_URL) throw new Error('MONGO_URI/DATABASE_URL не заданы');
   await mongoose.connect(process.env.MONGO_URI);
   const Payment = require('../v2/models/Payment');
-  const prisma = new PrismaClient();
+  const prisma = makeScriptPrisma();
 
   const total = await Payment.countDocuments();
   console.log(`[etl] источник Atlas: ${total} платежей`);

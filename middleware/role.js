@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken')
+const { tokenFromRequest } = require('../v2/utils/authCookie')
 
 module.exports = function (roles) {
     return function (req, res, next) {
@@ -7,7 +8,8 @@ module.exports = function (roles) {
         }
 
         try {
-            const token = req.headers.authorization.split(' ')[1]
+            // Токен из HttpOnly-cookie или Bearer-заголовка.
+            const token = tokenFromRequest(req)
             if (!token) {
                 return res.status(403).json({message: req.t('api.auth.notAuthorized')})
             }

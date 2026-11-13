@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User'); 
+const User = require('../models/User');
+const { tokenFromRequest } = require('../v2/utils/authCookie');
 
 module.exports = async function (req, res, next) {
     if (req.method === "OPTIONS") {
@@ -7,14 +8,10 @@ module.exports = async function (req, res, next) {
     }
 
     try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader) {
-            return res.status(401).json({ message: req.t('api.auth.tokenNotProvided') });
-        }
-
-        const token = authHeader.split(' ')[1];
+        // Токен из HttpOnly-cookie или заголовка Authorization: Bearer (обратная совместимость).
+        const token = tokenFromRequest(req);
         if (!token) {
-            return res.status(401).json({ message: req.t('api.auth.tokenMissing') });
+            return res.status(401).json({ message: req.t('api.auth.tokenNotProvided') });
         }
 
         const decodedData = jwt.verify(token, process.env.JWT_SECRET);

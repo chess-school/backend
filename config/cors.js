@@ -19,8 +19,11 @@ const isAllowedOrigin = (origin) => !origin || whitelist.includes(origin) || ver
 
 const corsOptions = {
     origin: (origin, callback) => {
-        if (isAllowedOrigin(origin)) callback(null, true);
-        else callback(new Error('This origin is not allowed by CORS'));
+        // Запрещённый origin отклоняем МЯГКО (без CORS-заголовков), а не через throw:
+        // callback(new Error()) уходил в error-handler и отдавал 500 INTERNAL_ERROR со стеком в логах
+        // на каждый кросс-доменный запрос с чужого origin. callback(null, false) = браузер сам блокирует
+        // ответ (нет Access-Control-Allow-Origin), а сервер отвечает штатно, без 500 и без шума в логах.
+        callback(null, isAllowedOrigin(origin));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

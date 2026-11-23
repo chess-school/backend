@@ -1,5 +1,7 @@
 const { Chess } = require('chess.js');
 const puzzleRepo = require('../repositories/puzzle.repo'); // шов content (mongo|pg по CONTENT_DB)
+const userRepo = require('../repositories/user.repo');
+const { computeRatingChange, DEFAULT_RATING } = require('../utils/puzzleRatingCalculator');
 
 /**
  * Базовая задача Lichess {fen, moves:UCI[]} → inline-упражнение конструктора курса (Фаза B):
@@ -77,8 +79,41 @@ const getRandomPuzzle = async (req, res) => {
     res.status(200).json({ success: true, data: toDto(puzzle), total: count });
 };
 
+// @desc    Записать попытку решения случайной задачи и обновить рейтинг пользователя (Lichess-style
+//          прогрессия для /puzzles). Рейтинг задачи берём СЕРВЕРНО по id (не доверяем клиенту).
+//          success=true → решено с 1-й попытки без подсказок (рейтинг растёт), иначе падает.
+//          Обновляем только рейтинг пользователя; общий рейтинг Lichess-задачи не мутируем.
+// @route   POST /api/v2/puzzles/attempt
+// @access  Private
+const recordAttempt = async (req, res) => {
+    const puzzleId = typeof req.body.puzzleId === 'string' ? req.body.puzzleId : '';
+    const success = req.body.success === true;
+    if (!puzzleId) {
+        return res.status(400).json({ msg: 'puzzleId is required.', code: 'VALIDATION_ERROR' });
+    }
+    const puzzle = await puzzleRepo.findById(puzzleId);
+    if (!puzzle) {
+        return res.status(404).json({ msg: 'Puzzle not found.', code: 'PUZZLE_NOT_FOUND' });
+    }
+    const userDoc = await userRepo.findPuzzleRating(req.user.id);
+    const userRating = (userDoc && Number.isFinite(userDoc.puzzleRating)) ? userDoc.puzzleRating : DEFAULT_RATING;
+    const puzzleRating = Number.isFinite(puzzle.rating) ? puzzle.rating : DEFAULT_RATING;
+
+    const change = computeRatingChange({ userRating, puzzleRating, success });
+    await userRepo.updatePuzzleRating(req.user.id, change.newUserRating);
+
+    res.status(201).json({ data: {
+        success,
+        userRating: change.newUserRating,
+        userRatingBefore: userRating,
+        userDelta: change.userDelta,
+        puzzleRating,
+    } });
+};
+
 // Экспортируем нашу функцию, чтобы ее можно было использовать в файле маршрутов
 module.exports = {
     getRandomPuzzle,
     pickPuzzles,
+    recordAttempt,
 };

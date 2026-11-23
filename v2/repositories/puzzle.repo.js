@@ -213,7 +213,17 @@ async function updateBookPuzzlesMeta(bookId, { published, bookTitle }) {
   );
 }
 
+/** Задача по id (для серверной верификации рейтинга при записи попытки). null — нет такой. */
+async function findById(id) {
+  if (usePg()) {
+    const row = await prisma().puzzle.findUnique({ where: { id: String(id) } });
+    return pgRowToDoc(row);
+  }
+  if (!mongoose.isValidObjectId(id)) return null;
+  return PuzzleMongo.findById(id).lean();
+}
+
 module.exports = {
-  getRandom, pickMany, upsertPuzzle, replaceManyBookPuzzles, deleteBookPuzzlesExcept, deleteById, updateBookPuzzlesMeta,
+  getRandom, findById, pickMany, upsertPuzzle, replaceManyBookPuzzles, deleteBookPuzzlesExcept, deleteById, updateBookPuzzlesMeta,
   usePg, _pgRowToDoc: pgRowToDoc, _docToPgData: docToPgData,
 };

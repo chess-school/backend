@@ -8,7 +8,7 @@ const withErrorHandling = require('../utils/withErrorHandling');
 const authMiddleware = require('../middleware/authV2.middleware');
 const validate = require('../middleware/validate');
 const roleMiddleware = require('../middleware/roleV2.middleware');
-const { query } = require('express-validator');
+const { query, body } = require('express-validator');
 
 // Подключаем наш новый контроллер
 const puzzleController = require('../controllers/puzzle.controller');
@@ -58,6 +58,22 @@ router.get(
         query('count').optional().isInt({ min: 1, max: 30 }).withMessage('count must be 1–30').toInt(),
     ]),
     puzzleController.pickPuzzles
+);
+
+
+/**
+ * @route   POST /api/v2/puzzles/attempt
+ * @desc    Записать попытку решения случайной задачи и обновить рейтинг пользователя (Lichess-style).
+ *          body: { puzzleId: string, success: boolean }. Рейтинг задачи проверяется серверно по id.
+ * @access  Private
+ */
+router.post(
+    '/attempt',
+    validate([
+        body('puzzleId').isString().trim().isLength({ min: 1, max: 60 }).withMessage('puzzleId must be 1–60 chars'),
+        body('success').isBoolean().withMessage('success must be boolean').toBoolean(),
+    ]),
+    puzzleController.recordAttempt
 );
 
 

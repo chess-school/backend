@@ -17,6 +17,17 @@ const upload = require('./middleware/upload');
 const HomeworkController  = require('./controllers/homework');
 const errorHandler = require('./middleware/errorHandler');
 
+// Инструментация для безопасного вывода legacy v1 из эксплуатации (Epic C): фронт подтверждённо
+// ходит только через /api/v2, но на /api смонтирован и v1-роутер. Логируем ЛЮБОЕ обращение к
+// не-v2 пути — так увидим, остались ли реальные потребители v1. Через /api проходят и v2-запросы
+// (v2 смонтирован следом) — их и /ping отфильтровываем. [V1-HIT] в логах = кандидат на расследование.
+router.use((req, res, next) => {
+  if (!req.path.startsWith('/v2') && req.path !== '/ping') {
+    console.log(`[V1-HIT] ${req.method} ${req.path} ip=${req.ip} ua=${(req.headers['user-agent'] || '').slice(0, 60)}`);
+  }
+  next();
+});
+
 //Auth
 router.post(
     '/auth/register',

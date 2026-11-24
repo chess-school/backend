@@ -20,6 +20,10 @@ const cookieOptions = (req) => ({
     secure: req ? !!req.secure : true,
     sameSite: 'strict',
     path: '/',
+    // SSO между поддоменами клубов: в проде кука общая для всех *.chess.motorcycles.
+    // sameSite='strict' при этом валиден — все поддомены считаются same-site (один
+    // регистрируемый домен). Локально (http, без COOKIE_DOMAIN) domain не ставим.
+    ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
 });
 
 const setAuthCookie = (res, token, req) => {

@@ -3,7 +3,20 @@
 
 const clubRepo = require('../repositories/club.repo'); // шов tenant (mongo|pg по TENANT_DB)
 const membershipRepo = require('../repositories/clubMembership.repo'); // шов tenant
+const userRepo = require('../repositories/user.repo'); // шов identity (глобальные роли)
+const coachRepo = require('../repositories/coach.repo'); // шов coaching (коуч-профиль)
+const { isTeachingRole } = require('../utils/clubPermissions');
 const { badRequest, notFound } = require('../utils/apiError');
+
+/** Синхронизировать глобальную капабилити под клубную роль. Обучающие роли (owner/admin/
+ *  trainer) получают глобальную COACH + коуч-профиль (идемпотентно), иначе кабинет
+ *  (RoleRoute COACH/ADMIN) и обучающие эндпоинты (roleMiddleware COACH) закрыты.
+ *  Переиспользуется при создании клуба и при смене роли участника. */
+const syncStaffCapability = async (userId, role, clubId) => {
+    if (!isTeachingRole(role)) return;
+    await userRepo.addRole(userId, 'COACH');
+    await coachRepo.upsertByUser(userId, { set: {}, club: clubId });
+};
 
 const DIACRITICS = /[̀-ͯ]/g; // комбинируемые диакритические знаки
 const slugify = (s) => String(s || '')
@@ -49,6 +62,9 @@ const createClub = async (ownerId, { name, slug, city, plan, brand } = {}) => {
 
     // Владелец — активное членство с ролью owner (идемпотентно)
     await membershipRepo.upsert(club._id, ownerId, { setOnInsert: { role: 'owner', status: 'active' } });
+    // ...и глобальная капабилити COACH + коуч-профиль, иначе владелец не видит ни кабинет,
+    // ни обучающие функции сразу после регистрации.
+    await syncStaffCapability(ownerId, 'owner', club._id);
     return club;
 };
 
@@ -61,4 +77,4 @@ const getClubForMember = async (clubId, userId) => {
     return { club, role: membership.role };
 };
 
-module.exports = { getUserClubs, createClub, getClubForMember, slugify, uniqueSlug };
+module.exports = { getUserClubs, createClub, getClubForMember, slugify, uniqueSlug, syncStaffCapability };

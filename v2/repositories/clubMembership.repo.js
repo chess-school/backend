@@ -42,6 +42,42 @@ async function countByClubRole(club, role, status = 'active') {
   return MembershipMongo.countDocuments({ club, role, status });
 }
 
+// Все членства клуба (для экрана «Участники»). status: undefined = любые кроме removed.
+async function findByClub(club, { status } = {}) {
+  if (usePg()) {
+    const where = { clubId: String(club), ...(status ? { status } : { status: { not: 'removed' } }) };
+    return (await prisma().clubMembership.findMany({ where, orderBy: { createdAt: 'asc' } })).map(pgRowToDoc);
+  }
+  const q = { club, ...(status ? { status } : { status: { $ne: 'removed' } }) };
+  return MembershipMongo.find(q).sort({ createdAt: 1 }).lean();
+}
+
+// Членство по club+user В ЛЮБОМ статусе (смена роли / удаление / реактивация).
+async function findOneAny(club, user) {
+  if (usePg()) return pgRowToDoc(await prisma().clubMembership.findFirst({ where: { clubId: String(club), userId: String(user) } })) || null;
+  return MembershipMongo.findOne({ club, user }).lean();
+}
+
+// Сменить роль участника. -> обновлённый док | null, если членства нет.
+async function updateRole(club, user, role) {
+  if (usePg()) {
+    const existing = await prisma().clubMembership.findFirst({ where: { clubId: String(club), userId: String(user) }, select: { id: true } });
+    if (!existing) return null;
+    return pgRowToDoc(await prisma().clubMembership.update({ where: { id: existing.id }, data: { role } }));
+  }
+  return MembershipMongo.findOneAndUpdate({ club, user }, { role }, { new: true }).lean();
+}
+
+// Сменить статус участника (active|invited|removed). -> обновлённый док | null.
+async function setStatus(club, user, status) {
+  if (usePg()) {
+    const existing = await prisma().clubMembership.findFirst({ where: { clubId: String(club), userId: String(user) }, select: { id: true } });
+    if (!existing) return null;
+    return pgRowToDoc(await prisma().clubMembership.update({ where: { id: existing.id }, data: { status } }));
+  }
+  return MembershipMongo.findOneAndUpdate({ club, user }, { status }, { new: true }).lean();
+}
+
 // Upsert членства (club.service: owner при создании клуба). $setOnInsert-семантика.
 async function upsert(club, user, { setOnInsert = {} } = {}) {
   if (usePg()) {
@@ -58,4 +94,4 @@ async function upsert(club, user, { setOnInsert = {} } = {}) {
   return MembershipMongo.findOne({ club, user }).lean();
 }
 
-module.exports = { findActive, findByUser, findByUserWithClub, countByClubRole, upsert, usePg, _pgRowToDoc: pgRowToDoc };
+module.exports = { findActive, findByUser, findByUserWithClub, findByClub, findOneAny, updateRole, setStatus, countByClubRole, upsert, usePg, _pgRowToDoc: pgRowToDoc };

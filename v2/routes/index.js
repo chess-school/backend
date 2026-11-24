@@ -40,6 +40,7 @@ router.use('/digitizer', digitizerRoutes);
 router.use('/puzzle-books', puzzleBookRoutes);
 router.use('/students', studentRoutes);
 router.use('/leads', require('./leads.routes'));
+router.use('/members', require('./members.routes'));
 // Интерактивный класс: токены доступа к медиа-микросервису LiveKit (видео/аудио/экран)
 router.use('/classrooms', require('./classroom.routes'));
 // Онлайн-партии (лобби, вызовы); ходы и часы — socket.io namespace /play
